@@ -192,6 +192,32 @@ async function executeSearch(
   await page.setUserAgent(BROWSER_CONFIG.userAgent);
   await page.setViewport(BROWSER_CONFIG.viewport);
 
+  // Set extra HTTP headers to look more like a browser
+  await page.setExtraHTTPHeaders({
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-IN,en;q=0.9,en-US;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    'Sec-CH-UA-Mobile': '?0',
+    'Sec-CH-UA-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+  });
+
+  // Override navigator properties to avoid detection
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en', 'en-US'] });
+    // @ts-ignore
+    window.chrome = { runtime: {} };
+  });
+
   // Block unnecessary resources to speed up loading
   await page.setRequestInterception(true);
   page.on('request', (req: HTTPRequest) => {

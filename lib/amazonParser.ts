@@ -20,15 +20,34 @@ export async function parseSearchResults(
   page: Page,
   targetAsin: string
 ): Promise<ParseResult> {
+  // Debug: Log page URL and title
+  const pageUrl = page.url();
+  const pageTitle = await page.title();
+  console.log(`[Parser] URL: ${pageUrl}`);
+  console.log(`[Parser] Title: ${pageTitle}`);
+
   // Phase 1: Initial parse
   let results = await extractResults(page);
+  console.log(`[Parser] Phase 1 results: ${results.length}`);
 
   // Phase 2: Scroll and re-parse for lazy-loaded content
   await scrollAndWait(page);
   const additionalResults = await extractResults(page);
+  console.log(`[Parser] Phase 2 additional: ${additionalResults.length}`);
 
   // Merge results, removing duplicates
   results = mergeResults(results, additionalResults);
+  console.log(`[Parser] Total merged: ${results.length}`);
+
+  // Debug: Log first few ASINs found
+  if (results.length > 0) {
+    const sampleAsins = results.slice(0, 5).map(r => r.asin);
+    console.log(`[Parser] Sample ASINs: ${sampleAsins.join(', ')}`);
+  } else {
+    // Debug: Check what's on the page
+    const bodyText = await page.evaluate(() => document.body.innerText.substring(0, 500));
+    console.log(`[Parser] No results. Body preview: ${bodyText.replace(/\n/g, ' ').substring(0, 200)}`);
+  }
 
   // Find target ASIN and calculate ranks
   return calculateRanks(results, targetAsin);
@@ -235,7 +254,19 @@ export async function hasCaptcha(page: Page): Promise<boolean> {
   try {
     const captchaElement = await page.$(AMAZON_SELECTORS.captcha);
     const captchaForm = await page.$(AMAZON_SELECTORS.captchaForm);
-    return captchaElement !== null || captchaForm !== null;
+    
+    // Also check for common bot detection patterns
+    const pageContent = await page.evaluate(() => document.body.innerText.toLowerCase());
+    const isBotPage = pageContent.includes('robot') || 
+                      pageContent.includes('captcha') ||
+                      pageContent.includes('automated access') ||
+                      pageContent.includes('unusual traffic');
+    
+    if (captchaElement !== null || captchaForm !== null || isBotPage) {
+      console.log('[Parser] CAPTCHA or bot detection page detected');
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
