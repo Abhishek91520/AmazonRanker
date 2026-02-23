@@ -142,10 +142,10 @@ export const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
 // Browser configuration for anti-detection
 export const BROWSER_CONFIG = {
   userAgent:
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
   viewport: {
-    width: 1920,
-    height: 1080,
+    width: 412,
+    height: 915,
   },
   locale: 'en-IN',
   timezone: 'Asia/Kolkata',
@@ -160,14 +160,16 @@ export const KEYWORD_CONSTRAINTS = {
   maxLength: 200,
 };
 
-// CSS Selectors for Amazon.in
+// CSS Selectors for Amazon.in (desktop + mobile)
 export const AMAZON_SELECTORS = {
   // Primary result container
   primaryResult: 'div[data-component-type="s-search-result"]',
+  // Mobile result container
+  mobileResult: '.s-result-item[data-asin]',
   // Fallback: any element with data-asin
-  fallbackResult: '[data-asin]',
+  fallbackResult: '[data-asin]:not([data-asin=""])',
   // Search results container
-  searchResults: '.s-main-slot',
+  searchResults: '.s-main-slot, .s-search-results',
   // Sponsored badge selectors (multiple for resilience)
   sponsoredBadge: [
     '.puis-sponsored-label-text',

@@ -59,12 +59,33 @@ export async function parseSearchResults(
 async function extractResults(page: Page): Promise<ExtractedResult[]> {
   const results: ExtractedResult[] = [];
 
-  // Try primary selector first
+  // Try multiple selectors in order of preference
   let elements = await page.$$(AMAZON_SELECTORS.primaryResult);
+  console.log(`[Parser] Primary selector found: ${elements.length}`);
 
-  // Fallback to data-asin selector if primary fails
+  // Try mobile selector
+  if (elements.length === 0) {
+    elements = await page.$$(AMAZON_SELECTORS.mobileResult);
+    console.log(`[Parser] Mobile selector found: ${elements.length}`);
+  }
+
+  // Fallback to data-asin selector if others fail
   if (elements.length === 0) {
     elements = await page.$$(AMAZON_SELECTORS.fallbackResult);
+    console.log(`[Parser] Fallback selector found: ${elements.length}`);
+  }
+
+  // Debug: Log all elements with data-asin on page
+  if (elements.length === 0) {
+    const allAsins = await page.evaluate(() => {
+      const els = document.querySelectorAll('[data-asin]');
+      return Array.from(els).map(el => ({
+        asin: el.getAttribute('data-asin'),
+        tag: el.tagName,
+        classes: el.className.substring(0, 50)
+      })).slice(0, 10);
+    });
+    console.log(`[Parser] All data-asin elements: ${JSON.stringify(allAsins)}`);
   }
 
   for (let i = 0; i < elements.length; i++) {

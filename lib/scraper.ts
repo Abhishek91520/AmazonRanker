@@ -192,16 +192,16 @@ async function executeSearch(
   await page.setUserAgent(BROWSER_CONFIG.userAgent);
   await page.setViewport(BROWSER_CONFIG.viewport);
 
-  // Set extra HTTP headers to look more like a browser
+  // Set extra HTTP headers to look more like a mobile browser
   await page.setExtraHTTPHeaders({
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'en-IN,en;q=0.9,en-US;q=0.8',
     'Accept-Encoding': 'gzip, deflate, br',
     'Cache-Control': 'no-cache',
     'Pragma': 'no-cache',
-    'Sec-CH-UA': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    'Sec-CH-UA-Mobile': '?0',
-    'Sec-CH-UA-Platform': '"Windows"',
+    'Sec-CH-UA': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'Sec-CH-UA-Mobile': '?1',
+    'Sec-CH-UA-Platform': '"Android"',
     'Sec-Fetch-Dest': 'document',
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Site': 'none',
@@ -214,6 +214,8 @@ async function executeSearch(
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
     Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
     Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en', 'en-US'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv81' });
+    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5 });
     // @ts-ignore
     window.chrome = { runtime: {} };
   });
