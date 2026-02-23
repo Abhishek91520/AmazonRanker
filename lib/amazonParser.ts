@@ -125,33 +125,48 @@ async function extractSingleResult(
     // Fallback: Direct DOM check for sponsored indicators
     if (!sponsored) {
       const hasDirectSponsored = await element.evaluate((el: Element) => {
-        // Check for text content containing "Sponsored"
+        // Check for text content containing "Sponsored" (case sensitive for accuracy)
         const text = el.textContent || '';
-        if (text.includes('Sponsored') || text.includes('sponsored')) return true;
+        if (text.includes('Sponsored')) return 'text';
         
         // Check for known sponsored class names
-        const html = el.innerHTML.toLowerCase();
-        if (html.includes('puis-sponsored') || 
-            html.includes('s-sponsored') || 
-            html.includes('sp-sponsored') ||
-            html.includes('adplaceholder')) return true;
+        const html = el.innerHTML;
+        if (/Sponsored/i.test(html)) return 'html';
+        if (/puis-sponsored|s-sponsored|sp-sponsored|adplaceholder/i.test(html)) return 'class';
         
         // Check data attributes
         const attrs = Array.from(el.attributes);
         for (const attr of attrs) {
           if (attr.name.startsWith('data-sp-') || 
               attr.name.startsWith('data-ad-') ||
-              attr.value.includes('sponsored')) return true;
+              /sponsored/i.test(attr.value)) return 'attr';
         }
         
-        return false;
+        // Check for common Amazon ad markers
+        if (el.querySelector('[data-component-type*="sp"]')) return 'component';
+        if (el.querySelector('.s-sponsored-label-info-icon')) return 'icon';
+        
+        return null;
       });
       
       if (hasDirectSponsored) {
         sponsored = true;
         sponsoredSignals.signalCount = 1;
         sponsoredSignals.hasSponsoredText = true;
+        // Log for debug
+        if (position <= 5) {
+          console.log(`[Parser] Fallback detected sponsored at pos ${position}: ${hasDirectSponsored}`);
+        }
       }
+    }
+
+    // Debug: For first 3 items, log if they contain "Sponsored" anywhere
+    if (position <= 3) {
+      const debugText = await element.evaluate((el: Element) => {
+        const text = el.textContent || '';
+        return text.substring(0, 100).replace(/\s+/g, ' ');
+      });
+      console.log(`[Parser] Item ${position} preview: ${debugText}`);
     }
 
     return {

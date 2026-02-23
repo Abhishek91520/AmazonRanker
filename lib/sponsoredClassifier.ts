@@ -55,14 +55,19 @@ export function isSponsored(signals: SponsoredSignals): boolean {
 
 /**
  * Signal 1: Detect sponsored text nodes
- * Looks for various "Sponsored" text patterns
+ * Looks for various "Sponsored" text patterns (desktop + mobile)
  */
 function detectSponsoredText(html: string): boolean {
   // Direct text content check - most reliable
-  const textMatch = html.match(/>([^<]*sponsored[^<]*)</i);
-  if (textMatch) return true;
+  if (/>[\s]*Sponsored[\s]*</i.test(html)) return true;
+  if (/>[\s]*sponsored[\s]*</i.test(html)) return true;
+  
+  // Mobile Amazon patterns
+  if (/Sponsored<\/span>/i.test(html)) return true;
+  if (/>Sponsored\s*$/im.test(html)) return true;
+  if (/class="[^"]*"[^>]*>\s*Sponsored/i.test(html)) return true;
 
-  // Check for sponsored label classes
+  // Check for sponsored label classes (desktop + mobile)
   const labelPatterns = [
     /puis-sponsored-label/i,
     /s-sponsored-label/i,
@@ -72,6 +77,12 @@ function detectSponsoredText(html: string): boolean {
     /AdHolder/i,
     /sponsored-products/i,
     /puis-sponsored/i,
+    // Mobile specific
+    /a-size-mini[^>]*Sponsored/i,
+    /a-color-secondary[^>]*>[\s]*Sponsored/i,
+    /a-text-normal[^>]*Sponsored/i,
+    /sponsored-listing/i,
+    /sponsored-brand/i,
   ];
 
   for (const pattern of labelPatterns) {
