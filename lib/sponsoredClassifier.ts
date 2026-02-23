@@ -6,7 +6,8 @@
 import { SponsoredSignals } from './types';
 
 // Minimum signals required to classify as sponsored
-const SPONSORED_THRESHOLD = 2;
+// Lowered to 1 for datacenter IP compatibility
+const SPONSORED_THRESHOLD = 1;
 
 /**
  * Analyzes DOM element for sponsored signals
@@ -57,12 +58,9 @@ export function isSponsored(signals: SponsoredSignals): boolean {
  * Looks for various "Sponsored" text patterns
  */
 function detectSponsoredText(html: string): boolean {
-  const sponsoredPatterns = [
-    /sponsored/i,
-    /प्रायोजित/i, // Hindi for "Sponsored"
-    /ad\s*$/i,
-    /advertisement/i,
-  ];
+  // Direct text content check - most reliable
+  const textMatch = html.match(/>([^<]*sponsored[^<]*)</i);
+  if (textMatch) return true;
 
   // Check for sponsored label classes
   const labelPatterns = [
@@ -70,18 +68,20 @@ function detectSponsoredText(html: string): boolean {
     /s-sponsored-label/i,
     /sponsored-badge/i,
     /sp-sponsored/i,
+    /s-sponsored-info/i,
+    /AdHolder/i,
+    /sponsored-products/i,
+    /puis-sponsored/i,
   ];
-
-  for (const pattern of sponsoredPatterns) {
-    // Look for text content, not just class names
-    const textMatch = html.match(/>([^<]*sponsored[^<]*)</i);
-    if (textMatch) return true;
-  }
 
   for (const pattern of labelPatterns) {
     if (pattern.test(html)) return true;
   }
 
+  // Check for "Sponsored" as visible text anywhere
+  if (/class="[^"]*"[^>]*>\s*Sponsored\s*</i.test(html)) return true;
+  if (/Sponsored<\/span>/i.test(html)) return true;
+  
   return false;
 }
 

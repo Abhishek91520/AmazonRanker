@@ -97,9 +97,41 @@ async function extractSingleResult(
     // Get outer HTML for sponsored classification
     const outerHtml = await element.evaluate((el: Element) => el.outerHTML);
 
-    // Classify sponsored status
+    // Classify sponsored status using multi-signal detection
     const sponsoredSignals = classifySponsored(outerHtml);
-    const sponsored = isSponsored(sponsoredSignals);
+    let sponsored = isSponsored(sponsoredSignals);
+
+    // Fallback: Direct DOM check for sponsored indicators
+    if (!sponsored) {
+      const hasDirectSponsored = await element.evaluate((el: Element) => {
+        // Check for text content containing "Sponsored"
+        const text = el.textContent || '';
+        if (text.includes('Sponsored') || text.includes('sponsored')) return true;
+        
+        // Check for known sponsored class names
+        const html = el.innerHTML.toLowerCase();
+        if (html.includes('puis-sponsored') || 
+            html.includes('s-sponsored') || 
+            html.includes('sp-sponsored') ||
+            html.includes('adplaceholder')) return true;
+        
+        // Check data attributes
+        const attrs = Array.from(el.attributes);
+        for (const attr of attrs) {
+          if (attr.name.startsWith('data-sp-') || 
+              attr.name.startsWith('data-ad-') ||
+              attr.value.includes('sponsored')) return true;
+        }
+        
+        return false;
+      });
+      
+      if (hasDirectSponsored) {
+        sponsored = true;
+        sponsoredSignals.signalCount = 1;
+        sponsoredSignals.hasSponsoredText = true;
+      }
+    }
 
     return {
       asin,
@@ -170,9 +202,18 @@ function calculateRanks(
   let firstFoundPosition: number | null = null;
   let firstFoundResult: ExtractedResult | null = null;
 
+  // Debug: Count sponsored vs organic
+  const sponsoredCount = results.filter(r => r.isSponsored).length;
+  console.log(`[Parser] Total results: ${results.length}, Sponsored: ${sponsoredCount}, Organic: ${results.length - sponsoredCount}`);
+
   // Scan ALL results to find both organic and sponsored positions AND get total counts
   for (const result of results) {
     const isTargetAsin = result.asin.toUpperCase() === targetAsin.toUpperCase();
+    
+    // Debug: Log when we find target ASIN
+    if (isTargetAsin) {
+      console.log(`[Parser] Found target ASIN ${result.asin} at position ${result.position}, isSponsored: ${result.isSponsored}, signals: ${result.sponsoredSignals.signalCount}`);
+    }
     
     if (result.isSponsored) {
       sponsoredRankCounter++;
