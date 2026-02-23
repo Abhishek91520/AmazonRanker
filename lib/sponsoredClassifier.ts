@@ -152,6 +152,15 @@ function detectAdMetadata(html: string): boolean {
     /class=["'][^"']*sp-item[^"']*["']/i,
     /cel_widget_id=["'][^"']*ADSENSE[^"']*["']/i,
     /cel_widget_id=["'][^"']*sp_[^"']*["']/i,
+    // URL-based detection
+    /href=["'][^"']*slredirect[^"']*["']/i,
+    /href=["'][^"']*\/gp\/slredirect[^"']*["']/i,
+    /href=["'][^"']*sp_csd[^"']*["']/i,
+    /href=["'][^"']*&linkCode=sp[^"']*["']/i,
+    // Data attributes for ad tracking
+    /data-csa-c-slot-id=["'][^"']*sp[^"']*["']/i,
+    /data-sp-link/i,
+    /data-hvp-metadata/i,
   ];
 
   for (const pattern of metadataPatterns) {

@@ -134,7 +134,7 @@ async function extractSingleResult(
         if (/Sponsored/i.test(html)) return 'html';
         if (/puis-sponsored|s-sponsored|sp-sponsored|adplaceholder/i.test(html)) return 'class';
         
-        // Check data attributes
+        // Check data attributes on element itself
         const attrs = Array.from(el.attributes);
         for (const attr of attrs) {
           if (attr.name.startsWith('data-sp-') || 
@@ -145,6 +145,18 @@ async function extractSingleResult(
         // Check for common Amazon ad markers
         if (el.querySelector('[data-component-type*="sp"]')) return 'component';
         if (el.querySelector('.s-sponsored-label-info-icon')) return 'icon';
+        
+        // Check cel_widget_id for sp_ prefix (sponsored product)
+        const celWidget = el.getAttribute('cel_widget_id') || '';
+        if (celWidget.includes('sp_') || celWidget.includes('ADSENSE')) return 'cel_widget';
+        
+        // Check for sponsored tracking URLs in links
+        const links = el.querySelectorAll('a[href*="slredirect"], a[href*="/gp/slredirect/"], a[href*="sp_csd"]');
+        if (links.length > 0) return 'sp-link';
+        
+        // Check for any nested element with sp data attribute
+        const spElements = el.querySelectorAll('[data-sp-link], [data-csa-c-slot-id*="sp"]');
+        if (spElements.length > 0) return 'sp-nested';
         
         return null;
       });
@@ -160,13 +172,34 @@ async function extractSingleResult(
       }
     }
 
-    // Debug: For first 3 items, log if they contain "Sponsored" anywhere
+    // Debug: For first 3 items, log sponsored-related HTML snippets
     if (position <= 3) {
-      const debugText = await element.evaluate((el: Element) => {
-        const text = el.textContent || '';
-        return text.substring(0, 100).replace(/\s+/g, ' ');
+      const sponsoredSnippets = await element.evaluate((el: Element) => {
+        const html = el.innerHTML;
+        // Look for any mention of 'sp' prefix or ad-related attributes
+        const matches: string[] = [];
+        
+        // Check for sponsored text
+        if (/sponsored/i.test(html)) matches.push('has-sponsored-text');
+        
+        // Check for sp- data attributes
+        const spAttrs = el.querySelectorAll('[data-component-type*="sp"], [cel_widget_id*="sp_"]');
+        if (spAttrs.length > 0) matches.push(`sp-attrs:${spAttrs.length}`);
+        
+        // Check for ad placement markers
+        if (/adPlacement|AdHolder|sp-item|puis-sponsored/i.test(html)) matches.push('ad-markers');
+        
+        // Check a-row with sponsored info
+        const sponsoredRow = el.querySelector('.puis-sponsored-label-info-icon, .s-sponsored-label-info-icon');
+        if (sponsoredRow) matches.push('sponsored-icon');
+        
+        // Get first 200 chars of text to see content
+        const text = (el.textContent || '').substring(0, 100).replace(/\s+/g, ' ');
+        
+        return { matches, text };
       });
-      console.log(`[Parser] Item ${position} preview: ${debugText}`);
+      console.log(`[Parser] Item ${position} sponsored signals: ${JSON.stringify(sponsoredSnippets.matches)}`);
+      console.log(`[Parser] Item ${position} text: ${sponsoredSnippets.text}`);
     }
 
     return {
