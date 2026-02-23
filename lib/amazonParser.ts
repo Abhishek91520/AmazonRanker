@@ -3,7 +3,7 @@
 // Layout-resilient DOM parsing engine
 // ============================================
 
-import type { Page, ElementHandle } from 'playwright-core';
+import type { Page, ElementHandle } from 'puppeteer-core';
 import { SearchResultItem, AMAZON_SELECTORS } from './types';
 import { classifySponsored, isSponsored } from './sponsoredClassifier';
 import { 
@@ -68,8 +68,8 @@ async function extractSingleResult(
   position: number
 ): Promise<ExtractedResult | null> {
   try {
-    // Get ASIN from data attribute
-    const asin = await element.getAttribute('data-asin');
+    // Get ASIN from data attribute (puppeteer-compatible)
+    const asin = await element.evaluate((el: Element) => el.getAttribute('data-asin'));
     
     if (!asin || asin.length !== 10) {
       return null;
@@ -108,11 +108,11 @@ async function scrollAndWait(page: Page): Promise<void> {
     await page.evaluate((y: number) => window.scrollTo({ top: y, behavior: 'smooth' }), scrollTarget);
 
     // Wait for lazy-loaded content
-    await page.waitForTimeout(1500 + Math.random() * 500);
+    await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 500));
 
     // Additional small scrolls to trigger more lazy loading
     await page.evaluate((y: number) => window.scrollTo({ top: y + 200, behavior: 'smooth' }), scrollTarget);
-    await page.waitForTimeout(500);
+    await new Promise(resolve => setTimeout(resolve, 500));
   } catch (error) {
     // Non-critical, continue with what we have
   }

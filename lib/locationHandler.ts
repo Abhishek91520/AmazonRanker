@@ -3,7 +3,7 @@
 // Simulates delivery location for Amazon.in
 // ============================================
 
-import type { Page } from 'playwright-core';
+import type { Page } from 'puppeteer-core';
 
 /**
  * Location cookie configuration for Amazon.in
@@ -27,8 +27,8 @@ export async function setDeliveryLocation(
     const timestamp = Date.now();
     const randomId = generateRandomId(17);
 
-    // Set location-related cookies
-    await page.context().addCookies([
+    // Set location-related cookies using Puppeteer's setCookie API
+    await page.setCookie(
       {
         name: 'ubid-acbin',
         value: randomId,
@@ -52,8 +52,8 @@ export async function setDeliveryLocation(
         path: '/',
         secure: true,
         httpOnly: false,
-      },
-    ]);
+      }
+    );
 
     // Try to set location via Amazon's location API
     await simulatePincodeSelection(page, pincode);
@@ -116,15 +116,15 @@ export async function setLocationViaDOM(
     // Enter pincode
     const input = await page.$('#GLUXZipUpdateInput');
     if (input) {
-      await input.fill(pincode);
+      await input.type(pincode);
       
       // Click apply button
-      const applyButton = await page.$('#GLUXZipUpdate, .a-button-text:has-text("Apply")');
+      const applyButton = await page.$('#GLUXZipUpdate');
       if (applyButton) {
         await applyButton.click();
         
         // Wait for location update
-        await page.waitForTimeout(2000);
+        await new Promise(resolve => setTimeout(resolve, 2000));
         return true;
       }
     }

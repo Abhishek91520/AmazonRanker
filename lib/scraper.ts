@@ -1,10 +1,12 @@
 // ============================================
 // Main Scraper Module
 // Elite resilient scraping engine for Amazon.in
+// Using Puppeteer for Vercel compatibility
 // ============================================
 
-import { chromium as playwrightChromium } from 'playwright-core';
+import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
+import type { Browser, Page, HTTPRequest } from 'puppeteer-core';
 import {
   RankCheckRequest,
   RankCheckResponse,
@@ -19,15 +21,12 @@ import {
 import { parseSearchResults, hasCaptcha, hasNoResults, ParseResult } from './amazonParser';
 import { setDeliveryLocation, getLocationAwareSearchUrl } from './locationHandler';
 import {
-  executeWithRetry,
   createErrorResponse,
   classifyError,
-  getErrorMessage,
   sleep,
   RetryConfig,
   DEFAULT_RETRY_CONFIG,
 } from './retryHandler';
-import type { Browser, BrowserContext, Page } from 'playwright-core';
 
 /**
  * Main entry point for rank checking
@@ -143,69 +142,38 @@ function validateInput(request: RankCheckRequest): ErrorCode | null {
 async function launchBrowser(): Promise<Browser> {
   const isVercel = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
 
-  const browser = await playwrightChromium.launch({
-    args: isVercel
-      ? chromium.args
-      : [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--single-process',
-        ],
-    executablePath: isVercel
-      ? await chromium.executablePath()
-      : undefined,
-    headless: true,
-  });
-
-  return browser;
-}
-
-/**
- * Creates browser context with anti-detection measures
- */
-async function createContext(browser: Browser): Promise<BrowserContext> {
-  const context = await browser.newContext({
-    userAgent: BROWSER_CONFIG.userAgent,
-    viewport: BROWSER_CONFIG.viewport,
-    locale: BROWSER_CONFIG.locale,
-    timezoneId: BROWSER_CONFIG.timezone,
-    deviceScaleFactor: 1,
-    hasTouch: false,
-    isMobile: false,
-    javaScriptEnabled: true,
-  });
-
-  // Set request interception to block unnecessary resources
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await context.route('**/*', (route: any) => {
-    const resourceType = route.request().resourceType();
-    const url = route.request().url();
-
-    // Block images, fonts, and media
-    if (['image', 'font', 'media', 'stylesheet'].includes(resourceType)) {
-      return route.abort();
-    }
-
-    // Block tracking/analytics scripts
-    const blockPatterns = [
-      'google-analytics',
-      'googletagmanager',
-      'facebook',
-      'doubleclick',
-      'amazon-adsystem',
-      'criteo',
-    ];
-
-    if (blockPatterns.some((p) => url.includes(p))) {
-      return route.abort();
-    }
-
-    return route.continue();
-  });
-
-  return context;
+  if (isVercel) {
+    // On Vercel: Use @sparticuz/chromium
+    const executablePath = await chromium.executablePath();
+    
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: executablePath,
+      headless: chromium.headless,
+    });
+    
+    return browser;
+  } else {
+    // Local development: Try to find Chrome/Chromium
+    const browser = await puppeteer.launch({
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
+      headless: true,
+      // Try common Chrome paths for local development
+      executablePath: process.platform === 'win32'
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+        : process.platform === 'darwin'
+        ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        : '/usr/bin/google-chrome',
+    });
+    
+    return browser;
+  }
 }
 
 /**
@@ -218,8 +186,39 @@ async function executeSearch(
   request: RankCheckRequest,
   config: ScraperConfig
 ): Promise<RankCheckResponse> {
-  const context = await createContext(browser);
-  const page = await context.newPage();
+  const page = await browser.newPage();
+  
+  // Set user agent and viewport
+  await page.setUserAgent(BROWSER_CONFIG.userAgent);
+  await page.setViewport(BROWSER_CONFIG.viewport);
+
+  // Block unnecessary resources to speed up loading
+  await page.setRequestInterception(true);
+  page.on('request', (req: HTTPRequest) => {
+    const resourceType = req.resourceType();
+    const url = req.url();
+    
+    // Block images, fonts, media, and tracking
+    if (['image', 'font', 'media', 'stylesheet'].includes(resourceType)) {
+      req.abort();
+      return;
+    }
+    
+    const blockPatterns = [
+      'google-analytics',
+      'googletagmanager',
+      'facebook',
+      'doubleclick',
+      'amazon-adsystem',
+    ];
+    
+    if (blockPatterns.some((p) => url.includes(p))) {
+      req.abort();
+      return;
+    }
+    
+    req.continue();
+  });
 
   // Set location if enabled
   if (request.enableLocation && request.locationPincode) {
@@ -290,8 +289,8 @@ async function executeSearch(
       }
 
       // Update cumulative counts for next page
-      cumulativeOrganicRank += countOrganic(parseResult);
-      cumulativeSponsoredRank += countSponsored(parseResult);
+      cumulativeOrganicRank += parseResult.totalOrganicCount;
+      cumulativeSponsoredRank += parseResult.totalSponsoredCount;
 
       // Delay between pages
       if (pageNum < config.maxPages) {
@@ -316,7 +315,6 @@ async function executeSearch(
     };
   } finally {
     await page.close();
-    await context.close();
   }
 }
 
@@ -325,32 +323,17 @@ async function executeSearch(
  */
 async function waitForResults(page: Page, timeout: number): Promise<void> {
   try {
-    // Wait for primary selector
     await page.waitForSelector(
       'div[data-component-type="s-search-result"], [data-asin]',
       { timeout }
     );
   } catch {
-    // If selector not found, check if page loaded but has no results
+    // If selector not found, check if page loaded
     const bodyLength = await page.evaluate(() => document.body.innerHTML.length);
     if (bodyLength < 1000) {
       throw new Error('Page failed to load properly');
     }
   }
-}
-
-/**
- * Counts organic results from parse result
- */
-function countOrganic(result: ParseResult): number {
-  return result.totalOrganicCount;
-}
-
-/**
- * Counts sponsored results from parse result
- */
-function countSponsored(result: ParseResult): number {
-  return result.totalSponsoredCount;
 }
 
 /**
