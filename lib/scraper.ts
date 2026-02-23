@@ -192,16 +192,14 @@ async function executeSearch(
   await page.setUserAgent(BROWSER_CONFIG.userAgent);
   await page.setViewport(BROWSER_CONFIG.viewport);
 
-  // Set extra HTTP headers to look more like a mobile browser
+  // Set extra HTTP headers to look more like a real browser
   await page.setExtraHTTPHeaders({
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-IN,en;q=0.9,en-US;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Cache-Control': 'no-cache',
-    'Pragma': 'no-cache',
-    'Sec-CH-UA': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-    'Sec-CH-UA-Mobile': '?1',
-    'Sec-CH-UA-Platform': '"Android"',
+    'Accept-Language': 'en-IN,en-GB;q=0.9,en;q=0.8',
+    'Cache-Control': 'max-age=0',
+    'Sec-CH-UA': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    'Sec-CH-UA-Mobile': '?0',
+    'Sec-CH-UA-Platform': '"Windows"',
     'Sec-Fetch-Dest': 'document',
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Site': 'none',
@@ -211,13 +209,23 @@ async function executeSearch(
 
   // Override navigator properties to avoid detection
   await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en', 'en-US'] });
-    Object.defineProperty(navigator, 'platform', { get: () => 'Linux armv81' });
-    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 5 });
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { 
+      get: () => {
+        const plugins = [{ name: 'Chrome PDF Plugin' }, { name: 'Chrome PDF Viewer' }, { name: 'Native Client' }];
+        // @ts-ignore
+        plugins.length = 3;
+        return plugins;
+      }
+    });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en-GB', 'en'] });
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
     // @ts-ignore
-    window.chrome = { runtime: {} };
+    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {} };
+    // Hide automation
+    delete Object.getPrototypeOf(navigator).webdriver;
   });
 
   // Block unnecessary resources to speed up loading
@@ -253,6 +261,28 @@ async function executeSearch(
     await setDeliveryLocation(page, request.locationPincode);
   }
 
+  // Set cookies to look like a returning visitor
+  await page.setCookie(
+    {
+      name: 'session-id',
+      value: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      domain: '.amazon.in',
+      path: '/',
+    },
+    {
+      name: 'i18n-prefs',
+      value: 'INR',
+      domain: '.amazon.in',
+      path: '/',
+    },
+    {
+      name: 'lc-acbin',
+      value: 'en_IN',
+      domain: '.amazon.in',
+      path: '/',
+    }
+  );
+
   // Track cumulative ranks across pages
   let cumulativeOrganicRank = 0;
   let cumulativeSponsoredRank = 0;
@@ -266,6 +296,7 @@ async function executeSearch(
       await page.goto(searchUrl, {
         waitUntil: 'domcontentloaded',
         timeout: config.navigationTimeoutMs,
+        referer: pageNum === 1 ? 'https://www.google.com/' : 'https://www.amazon.in/',
       });
 
       // Check for CAPTCHA
