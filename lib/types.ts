@@ -128,14 +128,14 @@ export interface ScraperConfig {
   locationPincode?: string;
 }
 
-// Default scraper configuration
+// Default scraper configuration - optimized for Vercel 60s timeout
 export const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
-  maxPages: 3,
-  maxRetries: 2,
-  baseBackoffMs: 2000,
-  requestTimeoutMs: 30000,
-  navigationTimeoutMs: 45000,
-  scrollDelayMs: 1500,
+  maxPages: 2,
+  maxRetries: 1,
+  baseBackoffMs: 1000,
+  requestTimeoutMs: 15000,
+  navigationTimeoutMs: 20000,
+  scrollDelayMs: 500,
   enableLocation: false,
 };
 

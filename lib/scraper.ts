@@ -256,8 +256,8 @@ async function executeSearch(
       // Wait for results to load
       await waitForResults(page, config.requestTimeoutMs);
 
-      // Add micro delay for anti-detection
-      await sleep(500 + Math.random() * 500);
+      // Minimal delay for anti-detection
+      await sleep(200);
 
       // Parse results
       const parseResult = await parseSearchResults(page, asin);
@@ -292,9 +292,9 @@ async function executeSearch(
       cumulativeOrganicRank += parseResult.totalOrganicCount;
       cumulativeSponsoredRank += parseResult.totalSponsoredCount;
 
-      // Delay between pages
+      // Brief delay between pages
       if (pageNum < config.maxPages) {
-        await sleep(config.scrollDelayMs + Math.random() * 500);
+        await sleep(300);
       }
     }
 

@@ -107,12 +107,8 @@ async function scrollAndWait(page: Page): Promise<void> {
     const scrollTarget = Math.min(documentHeight / 2, viewportHeight * 2);
     await page.evaluate((y: number) => window.scrollTo({ top: y, behavior: 'smooth' }), scrollTarget);
 
-    // Wait for lazy-loaded content
-    await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 500));
-
-    // Additional small scrolls to trigger more lazy loading
-    await page.evaluate((y: number) => window.scrollTo({ top: y + 200, behavior: 'smooth' }), scrollTarget);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Wait for lazy-loaded content - reduced for speed
+    await new Promise(resolve => setTimeout(resolve, 800));
   } catch (error) {
     // Non-critical, continue with what we have
   }
