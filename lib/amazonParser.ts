@@ -202,19 +202,24 @@ async function scrollAndWait(page: Page): Promise<void> {
 }
 
 /**
- * Merges two result arrays, removing duplicates by ASIN
+ * Merges two result arrays
+ * Allows same ASIN to appear as both sponsored AND organic (different entries)
+ * Only removes true duplicates (same ASIN with same isSponsored status)
  */
 function mergeResults(
   primary: ExtractedResult[],
   secondary: ExtractedResult[]
 ): ExtractedResult[] {
-  const asinSet = new Set(primary.map(r => r.asin));
+  // Create key combining ASIN + sponsored status to allow same ASIN in both categories
+  const getKey = (r: ExtractedResult) => `${r.asin}-${r.isSponsored}`;
+  const keySet = new Set(primary.map(getKey));
   const merged = [...primary];
 
   for (const result of secondary) {
-    if (!asinSet.has(result.asin)) {
+    const key = getKey(result);
+    if (!keySet.has(key)) {
       merged.push(result);
-      asinSet.add(result.asin);
+      keySet.add(key);
     }
   }
 
