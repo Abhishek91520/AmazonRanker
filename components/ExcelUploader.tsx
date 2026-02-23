@@ -58,20 +58,21 @@ export function ExcelUploader({ onUpload, isProcessing }: ExcelUploaderProps) {
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
 
-        // Convert to JSON
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        // Convert to JSON (header: 1 returns array of arrays)
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, {
           header: 1,
           defval: '',
-        });
+        }) as unknown[][];
 
         // Skip header row and parse data
         const rows: ExcelInputRow[] = [];
-        const hasHeader = isHeaderRow(jsonData[0] as string[]);
+        const firstRow = jsonData[0] as unknown[];
+        const hasHeader = isHeaderRow(firstRow?.map(String) || []);
         const startIndex = hasHeader ? 1 : 0;
 
         for (let i = startIndex; i < jsonData.length; i++) {
-          const row = jsonData[i] as string[];
-          if (row.length >= 2 && row[0] && row[1]) {
+          const row = jsonData[i] as unknown[];
+          if (row && row.length >= 2 && row[0] && row[1]) {
             const asin = String(row[0]).trim().toUpperCase();
             const keyword = String(row[1]).trim();
 
