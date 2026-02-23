@@ -343,22 +343,14 @@ async function waitForResults(page: Page, timeout: number): Promise<void> {
  * Counts organic results from parse result
  */
 function countOrganic(result: ParseResult): number {
-  // Estimate based on total results and whether target was sponsored
-  // This is a simplification - in reality we'd count all items
-  if (!result.found) {
-    return Math.floor(result.totalResults * 0.8); // Assume 80% organic on average
-  }
-  return result.organicRank || 0;
+  return result.totalOrganicCount;
 }
 
 /**
  * Counts sponsored results from parse result
  */
 function countSponsored(result: ParseResult): number {
-  if (!result.found) {
-    return Math.floor(result.totalResults * 0.2); // Assume 20% sponsored on average
-  }
-  return result.sponsoredRank || 0;
+  return result.totalSponsoredCount;
 }
 
 /**

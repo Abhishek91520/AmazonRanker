@@ -140,70 +140,95 @@ function mergeResults(
 
 /**
  * Calculates organic and sponsored ranks for target ASIN
+ * Scans ALL results to find both organic and sponsored positions
  */
 function calculateRanks(
   results: ExtractedResult[],
   targetAsin: string
 ): ParseResult {
-  let organicRank = 0;
-  let sponsoredRank = 0;
-  let foundResult: ExtractedResult | null = null;
-  let foundPosition = 0;
+  let organicRankCounter = 0;
+  let sponsoredRankCounter = 0;
+  
+  // Track both organic and sponsored ranks separately
+  let foundOrganicRank: number | null = null;
+  let foundSponsoredRank: number | null = null;
+  let firstFoundPosition: number | null = null;
+  let firstFoundResult: ExtractedResult | null = null;
 
+  // Scan ALL results to find both organic and sponsored positions AND get total counts
   for (const result of results) {
-    // Increment appropriate counter
+    const isTargetAsin = result.asin.toUpperCase() === targetAsin.toUpperCase();
+    
     if (result.isSponsored) {
-      sponsoredRank++;
+      sponsoredRankCounter++;
+      // Record sponsored rank if this is our target and we haven't found it as sponsored yet
+      if (isTargetAsin && foundSponsoredRank === null) {
+        foundSponsoredRank = sponsoredRankCounter;
+        if (firstFoundPosition === null) {
+          firstFoundPosition = result.position;
+          firstFoundResult = result;
+        }
+      }
     } else {
-      organicRank++;
+      organicRankCounter++;
+      // Record organic rank if this is our target and we haven't found it as organic yet
+      if (isTargetAsin && foundOrganicRank === null) {
+        foundOrganicRank = organicRankCounter;
+        if (firstFoundPosition === null) {
+          firstFoundPosition = result.position;
+          firstFoundResult = result;
+        }
+      }
     }
-
-    // Check if this is our target
-    if (result.asin.toUpperCase() === targetAsin.toUpperCase()) {
-      foundResult = result;
-      foundPosition = result.position;
-      break;
-    }
+    // Note: We continue scanning to get accurate total counts for the page
   }
 
-  // If not found, reset ranks
-  if (!foundResult) {
+  // Total counts from this page
+  const totalOrganicCount = organicRankCounter;
+  const totalSponsoredCount = sponsoredRankCounter;
+
+  // If not found at all
+  if (foundOrganicRank === null && foundSponsoredRank === null) {
     return {
       found: false,
       organicRank: null,
       sponsoredRank: null,
       position: null,
       totalResults: results.length,
+      totalOrganicCount,
+      totalSponsoredCount,
       boundaryValidated: false,
     };
   }
 
   // Perform boundary validation if in boundary zone
   let boundaryValidated = true;
-  if (isInBoundaryZone(foundPosition, results.length)) {
-    boundaryValidated = quickValidateBoundaryResult(targetAsin, foundResult.html);
+  if (firstFoundPosition && firstFoundResult && isInBoundaryZone(firstFoundPosition, results.length)) {
+    boundaryValidated = quickValidateBoundaryResult(targetAsin, firstFoundResult.html);
     
     // If quick validation fails, do full validation
     if (!boundaryValidated) {
       const fullValidation = validateBoundaryResult(
         targetAsin,
-        foundResult.html,
-        foundPosition,
+        firstFoundResult.html,
+        firstFoundPosition,
         results.length
       );
       boundaryValidated = fullValidation.isValid;
     }
   }
 
-  // Return appropriate rank based on sponsored status
+  // Return both organic and sponsored ranks (may have both, one, or neither for each)
   return {
     found: true,
-    organicRank: foundResult.isSponsored ? null : organicRank,
-    sponsoredRank: foundResult.isSponsored ? sponsoredRank : null,
-    position: foundPosition,
+    organicRank: foundOrganicRank,
+    sponsoredRank: foundSponsoredRank,
+    position: firstFoundPosition,
     totalResults: results.length,
+    totalOrganicCount,
+    totalSponsoredCount,
     boundaryValidated,
-    isSponsored: foundResult.isSponsored,
+    isSponsored: foundSponsoredRank !== null && foundOrganicRank === null,
   };
 }
 
@@ -277,6 +302,8 @@ export interface ParseResult {
   sponsoredRank: number | null;
   position: number | null;
   totalResults: number;
+  totalOrganicCount: number;
+  totalSponsoredCount: number;
   boundaryValidated: boolean;
   isSponsored?: boolean;
 }
