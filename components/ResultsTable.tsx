@@ -74,6 +74,8 @@ export function ResultsTable({ jobs, onDownload, hasResults }: ResultsTableProps
       KEYWORD: job.keyword,
       SPONSORED_RANK: job.result?.sponsoredRank ?? 'Not Found',
       ORGANIC_RANK: job.result?.organicRank ?? 'Not Found',
+      SPONSORED_PAGE_FOUND: job.result?.sponsoredPageFound ?? '-',
+      ORGANIC_PAGE_FOUND: job.result?.organicPageFound ?? '-',
       PAGE_FOUND: job.result?.pageFound ?? '-',
       STATUS: job.status,
       ERROR: job.error?.message ?? '',
@@ -85,7 +87,7 @@ export function ResultsTable({ jobs, onDownload, hasResults }: ResultsTableProps
     XLSX.utils.book_append_sheet(wb, ws, 'Results');
 
     // Style header row
-    const headerRange = XLSX.utils.decode_range(ws['!ref'] || 'A1:G1');
+    const headerRange = XLSX.utils.decode_range(ws['!ref'] || 'A1:I1');
     for (let col = headerRange.s.c; col <= headerRange.e.c; col++) {
       const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
       if (ws[cellAddress]) {
@@ -102,6 +104,8 @@ export function ResultsTable({ jobs, onDownload, hasResults }: ResultsTableProps
       { wch: 30 }, // KEYWORD
       { wch: 15 }, // SPONSORED_RANK
       { wch: 15 }, // ORGANIC_RANK
+      { wch: 20 }, // SPONSORED_PAGE_FOUND
+      { wch: 20 }, // ORGANIC_PAGE_FOUND
       { wch: 12 }, // PAGE_FOUND
       { wch: 12 }, // STATUS
       { wch: 30 }, // ERROR
@@ -185,8 +189,9 @@ export function ResultsTable({ jobs, onDownload, hasResults }: ResultsTableProps
               <th className="px-4 py-3 text-left text-text-secondary font-medium">ASIN</th>
               <th className="px-4 py-3 text-left text-text-secondary font-medium">Keyword</th>
               <th className="px-4 py-3 text-center text-text-secondary font-medium">Organic</th>
+              <th className="px-4 py-3 text-center text-text-secondary font-medium">Organic Page</th>
               <th className="px-4 py-3 text-center text-text-secondary font-medium">Sponsored</th>
-              <th className="px-4 py-3 text-center text-text-secondary font-medium">Page</th>
+              <th className="px-4 py-3 text-center text-text-secondary font-medium">Sponsored Page</th>
               <th className="px-4 py-3 text-left text-text-secondary font-medium">Status</th>
             </tr>
           </thead>
@@ -223,6 +228,9 @@ export function ResultsTable({ jobs, onDownload, hasResults }: ResultsTableProps
                       <span className="text-text-secondary">-</span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-center text-text-primary">
+                    {job.result?.organicPageFound ?? '-'}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     {job.status === 'completed' ? (
                       <span
@@ -237,7 +245,7 @@ export function ResultsTable({ jobs, onDownload, hasResults }: ResultsTableProps
                     )}
                   </td>
                   <td className="px-4 py-3 text-center text-text-primary">
-                    {job.result?.pageFound ?? '-'}
+                    {job.result?.sponsoredPageFound ?? '-'}
                   </td>
                   <td className="px-4 py-3">
                     {getStatusBadge(job.status, job.retryCount)}

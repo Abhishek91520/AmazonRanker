@@ -374,6 +374,8 @@ async function executeSearch(
   // Track discovered ranks across scanned pages so we can return both values.
   let discoveredOrganicRank: number | null = null;
   let discoveredSponsoredRank: number | null = null;
+  let discoveredOrganicPage: number | null = null;
+  let discoveredSponsoredPage: number | null = null;
   let firstFoundPage: number | null = null;
   let firstFoundPosition: number | null = null;
 
@@ -446,10 +448,12 @@ async function executeSearch(
 
         if (parseResult.organicRank !== null && discoveredOrganicRank === null) {
           discoveredOrganicRank = cumulativeOrganicRank + parseResult.organicRank;
+          discoveredOrganicPage = pageNum;
         }
 
         if (parseResult.sponsoredRank !== null && discoveredSponsoredRank === null) {
           discoveredSponsoredRank = cumulativeSponsoredRank + parseResult.sponsoredRank;
+          discoveredSponsoredPage = pageNum;
         }
 
         // Return early only when both values are available.
@@ -459,6 +463,8 @@ async function executeSearch(
             keyword,
             organicRank: discoveredOrganicRank,
             sponsoredRank: discoveredSponsoredRank,
+            organicPageFound: discoveredOrganicPage,
+            sponsoredPageFound: discoveredSponsoredPage,
             pageFound: firstFoundPage,
             positionOnPage: firstFoundPosition,
             totalResultsScanned: totalScanned,
@@ -571,10 +577,12 @@ async function executeSearch(
 
           if (fallbackParse.organicRank !== null && discoveredOrganicRank === null) {
             discoveredOrganicRank = fallbackCumulativeOrganic + fallbackParse.organicRank;
+            discoveredOrganicPage = fallbackPageNum;
           }
 
           if (fallbackParse.sponsoredRank !== null && discoveredSponsoredRank === null) {
             discoveredSponsoredRank = fallbackCumulativeSponsored + fallbackParse.sponsoredRank;
+            discoveredSponsoredPage = fallbackPageNum;
           }
 
           if (discoveredOrganicRank !== null && discoveredSponsoredRank !== null) {
@@ -596,6 +604,8 @@ async function executeSearch(
                 keyword,
                 organicRank: discoveredOrganicRank,
                 sponsoredRank: discoveredSponsoredRank,
+                organicPageFound: discoveredOrganicPage,
+                sponsoredPageFound: discoveredSponsoredPage,
                 pageFound: firstFoundPage,
                 positionOnPage: firstFoundPosition,
                 totalResultsScanned: totalScanned + fallbackTotalScanned,
@@ -631,6 +641,8 @@ async function executeSearch(
           keyword,
           organicRank: discoveredOrganicRank,
           sponsoredRank: discoveredSponsoredRank,
+          organicPageFound: discoveredOrganicPage,
+          sponsoredPageFound: discoveredSponsoredPage,
           pageFound: firstFoundPage,
           positionOnPage: firstFoundPosition,
           totalResultsScanned: totalScanned,

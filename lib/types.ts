@@ -63,6 +63,8 @@ export interface RankResult {
   keyword: string;
   organicRank: number | null;
   sponsoredRank: number | null;
+  organicPageFound: number | null;
+  sponsoredPageFound: number | null;
   pageFound: number | null;
   positionOnPage: number | null;
   totalResultsScanned: number;
@@ -119,6 +121,8 @@ export interface ExcelOutputRow {
   KEYWORD: string;
   SPONSORED_RANK: number | string;
   ORGANIC_RANK: number | string;
+  SPONSORED_PAGE_FOUND: number | string;
+  ORGANIC_PAGE_FOUND: number | string;
   PAGE_FOUND: number | string;
   STATUS: string;
   ERROR: string;
