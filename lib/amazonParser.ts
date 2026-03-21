@@ -125,46 +125,69 @@ async function extractSingleResult(
     // Fallback: Direct DOM check for sponsored indicators
     if (!sponsored) {
       const hasDirectSponsored = await element.evaluate((el: Element) => {
-        // Check for text content containing "Sponsored" (case sensitive for accuracy)
-        const text = el.textContent || '';
-        if (text.includes('Sponsored')) return 'text';
-        
-        // Check for known sponsored class names
+        const text = (el.textContent || '').toLowerCase();
         const html = el.innerHTML;
-        if (/Sponsored/i.test(html)) return 'html';
-        if (/puis-sponsored|s-sponsored|sp-sponsored|adplaceholder/i.test(html)) return 'class';
-        
-        // Check data attributes on element itself
+
+        // 1) Direct sponsored labels in current card
+        if (/\bsponsored\b/i.test(text) || /\bsponsored\b/i.test(html)) return 'text';
+        if (/puis-sponsored|s-sponsored|sp-sponsored|adholder|adplaceholder/i.test(html)) return 'class';
+
+        // 2) Card-level metadata on self
         const attrs = Array.from(el.attributes);
         for (const attr of attrs) {
-          if (attr.name.startsWith('data-sp-') || 
-              attr.name.startsWith('data-ad-') ||
-              /sponsored/i.test(attr.value)) return 'attr';
+          if (attr.name.startsWith('data-sp-') || attr.name.startsWith('data-ad-')) return 'attr-name';
+          if (/sp_|sponsored|adsense|adplacement/i.test(attr.value)) return 'attr-value';
         }
-        
-        // Check for common Amazon ad markers
-        if (el.querySelector('[data-component-type*="sp"]')) return 'component';
-        if (el.querySelector('.s-sponsored-label-info-icon')) return 'icon';
-        
-        // Check cel_widget_id for sp_ prefix (sponsored product)
-        const celWidget = el.getAttribute('cel_widget_id') || '';
-        if (celWidget.includes('sp_') || celWidget.includes('ADSENSE')) return 'cel_widget';
-        
-        // Check for sponsored tracking URLs in links
-        const links = el.querySelectorAll('a[href*="slredirect"], a[href*="/gp/slredirect/"], a[href*="sp_csd"]');
-        if (links.length > 0) return 'sp-link';
-        
-        // Check for any nested element with sp data attribute
-        const spElements = el.querySelectorAll('[data-sp-link], [data-csa-c-slot-id*="sp"]');
-        if (spElements.length > 0) return 'sp-nested';
-        
+
+        // 3) Card descendants metadata/labels
+        if (el.querySelector('[data-component-type*="sp"], [data-csa-c-slot-id*="sp"], [data-sp-link]')) {
+          return 'nested-sp-data';
+        }
+        if (el.querySelector('.s-sponsored-label-info-icon, .puis-sponsored-label-info-icon')) {
+          return 'nested-icon';
+        }
+
+        // 4) Sponsored redirect/link signatures
+        const sponsoredLink = el.querySelector(
+          'a[href*="slredirect"], a[href*="/gp/slredirect/"], a[href*="sp_csd"], a[href*="sspa"], a[href*="sprefix="]'
+        );
+        if (sponsoredLink) return 'sponsored-link';
+
+        // 5) Ancestor-level markers (Amazon sometimes places sponsored flags on wrappers)
+        let node: Element | null = el;
+        for (let depth = 0; depth < 4 && node; depth++) {
+          const nodeHtml = node.outerHTML || '';
+          const celWidget = node.getAttribute('cel_widget_id') || '';
+          const componentType = node.getAttribute('data-component-type') || '';
+          const slotId = node.getAttribute('data-csa-c-slot-id') || '';
+
+          if (/sp_|adsense|sponsored/i.test(celWidget)) return 'ancestor-cel-widget';
+          if (/sp-sponsored|s-sponsored|s-search-result/i.test(componentType) && /sp|sponsored/i.test(componentType)) {
+            return 'ancestor-component';
+          }
+          if (/sp|sponsored/i.test(slotId)) return 'ancestor-slot';
+          if (/puis-sponsored|s-sponsored|sp-sponsored|adholder|adsense/i.test(nodeHtml)) {
+            return 'ancestor-html';
+          }
+
+          node = node.parentElement;
+        }
+
+        // 6) Sibling label fallback (label may be adjacent, not nested)
+        const prev = el.previousElementSibling;
+        const next = el.nextElementSibling;
+        const prevText = (prev?.textContent || '').toLowerCase();
+        const nextText = (next?.textContent || '').toLowerCase();
+        if (/\bsponsored\b/.test(prevText) || /\bsponsored\b/.test(nextText)) return 'sibling-label';
+
         return null;
       });
       
       if (hasDirectSponsored) {
         sponsored = true;
-        sponsoredSignals.signalCount = 1;
-        sponsoredSignals.hasSponsoredText = true;
+        sponsoredSignals.signalCount = Math.max(1, sponsoredSignals.signalCount);
+        sponsoredSignals.hasSponsoredText = /text|class|sibling-label/.test(hasDirectSponsored);
+        sponsoredSignals.hasAdMetadata = /attr|data|link|widget|component|slot|html/.test(hasDirectSponsored);
         // Log for debug
         if (position <= 5) {
           console.log(`[Parser] Fallback detected sponsored at pos ${position}: ${hasDirectSponsored}`);
