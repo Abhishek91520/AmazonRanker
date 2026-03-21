@@ -466,7 +466,137 @@ async function executeSearch(
       }
     }
 
-    // ASIN not found after scanning all pages
+    // Fallback strategy: If location was enabled and ASIN not found,
+    // retry scan without location constraints because sponsored inventory can vary by pincode.
+    if (request.enableLocation && request.locationPincode) {
+      scraperLog(runId, 'Starting no-location fallback scan', {
+        previousLocationPincode: request.locationPincode,
+        pagesToScan: config.maxPages,
+      });
+      debugLogger?.('no_location_fallback_started', {
+        previousLocationPincode: request.locationPincode,
+        pagesToScan: config.maxPages,
+      });
+
+      try {
+        // Clear location cookies/storage that can force location-specific inventory.
+        await page.deleteCookie(
+          { name: 'ubid-acbin', domain: '.amazon.in', path: '/' },
+          { name: 'session-id', domain: '.amazon.in', path: '/' },
+          { name: 'lc-acbin', domain: '.amazon.in', path: '/' },
+          { name: 'i18n-prefs', domain: '.amazon.in', path: '/' }
+        );
+        await page.evaluate(() => {
+          try {
+            localStorage.removeItem('glow-pincode');
+            localStorage.removeItem('glow-validatedPincode');
+            localStorage.removeItem('glow-locationDisplaySetting');
+            sessionStorage.removeItem('s-zipcode');
+          } catch {
+            // Ignore storage cleanup errors
+          }
+        });
+      } catch (cleanupError) {
+        scraperLog(runId, 'No-location fallback cleanup warning', {
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+
+      let fallbackCumulativeOrganic = 0;
+      let fallbackCumulativeSponsored = 0;
+      let fallbackTotalScanned = 0;
+
+      for (let fallbackPageNum = 1; fallbackPageNum <= config.maxPages; fallbackPageNum++) {
+        const fallbackUrl = getLocationAwareSearchUrl(keyword, fallbackPageNum, undefined);
+        scraperLog(runId, 'Navigating fallback no-location page', {
+          pageNum: fallbackPageNum,
+          fallbackUrl,
+        });
+        debugLogger?.('no_location_fallback_navigation_started', {
+          pageNum: fallbackPageNum,
+          fallbackUrl,
+        });
+
+        await page.goto(fallbackUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: config.navigationTimeoutMs,
+          referer: 'https://www.amazon.in/',
+        });
+
+        await waitForResults(page, config.requestTimeoutMs);
+        await sleep(200);
+
+        const fallbackParse = await parseSearchResults(page, asin);
+        fallbackTotalScanned += fallbackParse.totalResults;
+
+        scraperLog(runId, 'No-location fallback page parsed', {
+          pageNum: fallbackPageNum,
+          found: fallbackParse.found,
+          organicRankOnPage: fallbackParse.organicRank,
+          sponsoredRankOnPage: fallbackParse.sponsoredRank,
+          totalResultsOnPage: fallbackParse.totalResults,
+        });
+        debugLogger?.('no_location_fallback_page_parsed', {
+          pageNum: fallbackPageNum,
+          found: fallbackParse.found,
+          organicRankOnPage: fallbackParse.organicRank,
+          sponsoredRankOnPage: fallbackParse.sponsoredRank,
+          totalResultsOnPage: fallbackParse.totalResults,
+        });
+
+        if (fallbackParse.found) {
+          const fallbackResult: RankResult = {
+            asin,
+            keyword,
+            organicRank:
+              fallbackParse.organicRank !== null
+                ? fallbackCumulativeOrganic + fallbackParse.organicRank
+                : null,
+            sponsoredRank:
+              fallbackParse.sponsoredRank !== null
+                ? fallbackCumulativeSponsored + fallbackParse.sponsoredRank
+                : null,
+            pageFound: fallbackPageNum,
+            positionOnPage: fallbackParse.position,
+            totalResultsScanned: fallbackTotalScanned,
+            scannedPages: fallbackPageNum,
+            timestamp: new Date().toISOString(),
+          };
+
+          scraperLog(runId, 'No-location fallback succeeded', {
+            organicRank: fallbackResult.organicRank,
+            sponsoredRank: fallbackResult.sponsoredRank,
+            pageFound: fallbackResult.pageFound,
+          });
+          debugLogger?.('no_location_fallback_succeeded', {
+            organicRank: fallbackResult.organicRank,
+            sponsoredRank: fallbackResult.sponsoredRank,
+            pageFound: fallbackResult.pageFound,
+          });
+
+          return {
+            success: true,
+            data: fallbackResult,
+          };
+        }
+
+        fallbackCumulativeOrganic += fallbackParse.totalOrganicCount;
+        fallbackCumulativeSponsored += fallbackParse.totalSponsoredCount;
+
+        if (fallbackPageNum < config.maxPages) {
+          await sleep(300);
+        }
+      }
+
+      scraperLog(runId, 'No-location fallback finished without match', {
+        totalScanned: fallbackTotalScanned,
+      });
+      debugLogger?.('no_location_fallback_failed', {
+        totalScanned: fallbackTotalScanned,
+      });
+    }
+
+    // ASIN not found after all strategies
     scraperLog(runId, 'ASIN not found after scanning all pages', {
       asin,
       keyword,
