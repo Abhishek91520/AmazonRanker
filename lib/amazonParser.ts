@@ -632,12 +632,20 @@ export async function getTotalPages(page: Page): Promise<number> {
 }
 
 // Internal types
+interface SponsoredSignals {
+  hasSponsoredText: boolean;
+  hasBadgeContainer: boolean;
+  hasAriaLabel: boolean;
+  hasAdMetadata: boolean;
+  signalCount: number;
+}
+
 interface ExtractedResult {
   asin: string;
   position: number;
   isSponsored: boolean;
   html: string;
-  sponsoredSignals: ReturnType<typeof classifySponsored>;
+  sponsoredSignals: SponsoredSignals;
 }
 
 export interface ParseResult {
