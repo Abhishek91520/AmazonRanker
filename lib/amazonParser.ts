@@ -97,7 +97,105 @@ async function extractResults(page: Page): Promise<ExtractedResult[]> {
     }
   }
 
+  // Dedicated sponsored extraction pass.
+  // Amazon sometimes renders sponsored markers outside the standard search result card.
+  const sponsoredCandidates = await extractSponsoredCandidates(page);
+  if (sponsoredCandidates.length > 0) {
+    console.log(`[Parser] Dedicated sponsored candidates found: ${sponsoredCandidates.length}`);
+  }
+
+  const existingSponsoredAsins = new Set(
+    results.filter((r) => r.isSponsored).map((r) => r.asin.toUpperCase())
+  );
+
+  for (const candidate of sponsoredCandidates) {
+    if (!existingSponsoredAsins.has(candidate.asin.toUpperCase())) {
+      results.push(candidate);
+      existingSponsoredAsins.add(candidate.asin.toUpperCase());
+    }
+  }
+
   return results;
+}
+
+/**
+ * Extract sponsored ASINs from ad wrappers and sponsored links.
+ * This improves reliability in Vercel/datacenter responses where labels are not inside the product card.
+ */
+async function extractSponsoredCandidates(page: Page): Promise<ExtractedResult[]> {
+  const candidates = await page.evaluate(() => {
+    const asinRegexes = [
+      /\/dp\/([A-Z0-9]{10})(?:[/?]|$)/i,
+      /\/gp\/product\/([A-Z0-9]{10})(?:[/?]|$)/i,
+      /[?&]asin=([A-Z0-9]{10})(?:[&]|$)/i,
+    ];
+
+    const extractAsinFromHref = (href: string): string | null => {
+      for (const re of asinRegexes) {
+        const match = href.match(re);
+        if (match && match[1]) return match[1].toUpperCase();
+      }
+      return null;
+    };
+
+    const markers = document.querySelectorAll(
+      '[aria-label*="sponsored" i], [data-csa-c-type*="sponsored" i], [data-component-type*="sp-sponsored" i], .puis-sponsored-label-text, .s-sponsored-label-info-icon, [cel_widget_id*="sp_"], [cel_widget_id*="ADSENSE"]'
+    );
+
+    const found: Array<{ asin: string; marker: string }> = [];
+    const seen = new Set<string>();
+
+    markers.forEach((markerEl) => {
+      const card = markerEl.closest('[data-asin]') as HTMLElement | null;
+      const cardAsin = (card?.getAttribute('data-asin') || '').toUpperCase();
+      if (cardAsin && /^[A-Z0-9]{10}$/.test(cardAsin) && !seen.has(cardAsin)) {
+        found.push({ asin: cardAsin, marker: 'marker-card' });
+        seen.add(cardAsin);
+      }
+
+      const scope = (card || markerEl.parentElement || markerEl) as Element;
+      const links = scope.querySelectorAll('a[href]');
+      links.forEach((link) => {
+        const href = (link.getAttribute('href') || '').trim();
+        if (!href) return;
+        const asin = extractAsinFromHref(href);
+        if (asin && !seen.has(asin)) {
+          found.push({ asin, marker: 'marker-link' });
+          seen.add(asin);
+        }
+      });
+    });
+
+    // Additional sponsored redirect sweep across page for sspa/slredirect links.
+    const sponsoredLinks = document.querySelectorAll(
+      'a[href*="slredirect"], a[href*="/gp/slredirect/"], a[href*="sspa"], a[href*="sp_csd"]'
+    );
+
+    sponsoredLinks.forEach((link) => {
+      const href = (link.getAttribute('href') || '').trim();
+      const asin = extractAsinFromHref(href);
+      if (asin && !seen.has(asin)) {
+        found.push({ asin, marker: 'global-sponsored-link' });
+        seen.add(asin);
+      }
+    });
+
+    return found;
+  });
+
+  return candidates.map((candidate, index) => ({
+    asin: candidate.asin,
+    position: index + 1,
+    isSponsored: true,
+    html: candidate.marker,
+    sponsoredSignals: {
+      hasSponsoredText: false,
+      hasBadgeContainer: false,
+      hasAriaLabel: false,
+      hasAdMetadata: true,
+      signalCount: 1,
+    },
+  }));
 }
 
 /**

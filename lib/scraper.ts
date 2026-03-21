@@ -28,6 +28,15 @@ import {
   DEFAULT_RETRY_CONFIG,
 } from './retryHandler';
 
+function scraperLog(runId: string, message: string, meta?: Record<string, unknown>): void {
+  const timestamp = new Date().toISOString();
+  if (meta) {
+    console.log(`[SCRAPER][${timestamp}][${runId}] ${message}`, meta);
+    return;
+  }
+  console.log(`[SCRAPER][${timestamp}][${runId}] ${message}`);
+}
+
 /**
  * Main entry point for rank checking
  * Handles validation, browser management, and retry logic
@@ -36,9 +45,22 @@ export async function checkAsinRank(
   request: RankCheckRequest,
   config: ScraperConfig = DEFAULT_SCRAPER_CONFIG
 ): Promise<RankCheckResponse> {
+  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+
+  scraperLog(runId, 'Rank check request received', {
+    asin: request.asin,
+    keyword: request.keyword,
+    maxPages: config.maxPages,
+    maxRetries: config.maxRetries,
+    enableLocation: request.enableLocation,
+    locationPincode: request.locationPincode || null,
+  });
+
   // Input validation
   const validationError = validateInput(request);
   if (validationError) {
+    scraperLog(runId, 'Input validation failed', { validationError });
     return createErrorResponse(validationError);
   }
 
@@ -58,22 +80,36 @@ export async function checkAsinRank(
 
   for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
     try {
+      scraperLog(runId, 'Starting attempt', {
+        attempt: attempt + 1,
+        totalAttempts: retryConfig.maxRetries + 1,
+      });
+
       // Launch browser for each attempt (clean context)
       browser = await launchBrowser();
+      scraperLog(runId, 'Browser launched successfully');
 
       const result = await executeSearch(
         browser,
         normalizedAsin,
         normalizedKeyword,
         request,
-        config
+        config,
+        runId
       );
 
       await browser.close();
+      scraperLog(runId, 'Attempt succeeded', {
+        durationMs: Date.now() - startedAt,
+      });
       return result;
     } catch (error) {
       lastError = classifyError(error);
-      console.error(`Attempt ${attempt + 1} failed:`, error);
+      scraperLog(runId, 'Attempt failed', {
+        attempt: attempt + 1,
+        errorCode: lastError,
+        error: error instanceof Error ? error.message : String(error),
+      });
 
       // Clean up browser
       if (browser) {
@@ -87,17 +123,23 @@ export async function checkAsinRank(
 
       // Check if we should retry
       if (!retryConfig.retryableErrors.includes(lastError)) {
+        scraperLog(runId, 'Error is non-retryable, stopping retries', { errorCode: lastError });
         break;
       }
 
       // Wait before retry (if not last attempt)
       if (attempt < retryConfig.maxRetries) {
         const backoff = retryConfig.baseBackoffMs * Math.pow(2, attempt);
+        scraperLog(runId, 'Waiting before retry', { backoffMs: backoff });
         await sleep(backoff);
       }
     }
   }
 
+  scraperLog(runId, 'All attempts exhausted', {
+    lastError,
+    durationMs: Date.now() - startedAt,
+  });
   return createErrorResponse(lastError);
 }
 
@@ -184,9 +226,11 @@ async function executeSearch(
   asin: string,
   keyword: string,
   request: RankCheckRequest,
-  config: ScraperConfig
+  config: ScraperConfig,
+  runId: string
 ): Promise<RankCheckResponse> {
   const page = await browser.newPage();
+  scraperLog(runId, 'New page created');
   
   // Set user agent and viewport
   await page.setUserAgent(BROWSER_CONFIG.userAgent);
@@ -259,6 +303,7 @@ async function executeSearch(
   // Set location if enabled
   if (request.enableLocation && request.locationPincode) {
     await setDeliveryLocation(page, request.locationPincode);
+    scraperLog(runId, 'Location set', { locationPincode: request.locationPincode });
   }
 
   // Set cookies to look like a returning visitor
@@ -292,20 +337,24 @@ async function executeSearch(
     for (let pageNum = 1; pageNum <= config.maxPages; pageNum++) {
       // Navigate to search page
       const searchUrl = getLocationAwareSearchUrl(keyword, pageNum, request.locationPincode);
+      scraperLog(runId, 'Navigating to search page', { pageNum, searchUrl });
       
       await page.goto(searchUrl, {
         waitUntil: 'domcontentloaded',
         timeout: config.navigationTimeoutMs,
         referer: pageNum === 1 ? 'https://www.google.com/' : 'https://www.amazon.in/',
       });
+      scraperLog(runId, 'Navigation complete', { pageNum });
 
       // Check for CAPTCHA
       if (await hasCaptcha(page)) {
+        scraperLog(runId, 'CAPTCHA detected', { pageNum });
         throw new Error('CAPTCHA detected');
       }
 
       // Check for no results
       if (await hasNoResults(page)) {
+        scraperLog(runId, 'No results detected on page', { pageNum });
         if (pageNum === 1) {
           return createErrorResponse('asin_not_found');
         }
@@ -321,6 +370,15 @@ async function executeSearch(
       // Parse results
       const parseResult = await parseSearchResults(page, asin);
       totalScanned += parseResult.totalResults;
+      scraperLog(runId, 'Page parsed', {
+        pageNum,
+        found: parseResult.found,
+        organicRankOnPage: parseResult.organicRank,
+        sponsoredRankOnPage: parseResult.sponsoredRank,
+        totalResultsOnPage: parseResult.totalResults,
+        totalOrganicCount: parseResult.totalOrganicCount,
+        totalSponsoredCount: parseResult.totalSponsoredCount,
+      });
 
       // Check if ASIN found
       if (parseResult.found) {
@@ -358,8 +416,15 @@ async function executeSearch(
     }
 
     // ASIN not found after scanning all pages
+    scraperLog(runId, 'ASIN not found after scanning all pages', {
+      asin,
+      keyword,
+      totalScanned,
+      scannedPages: config.maxPages,
+    });
     return createErrorResponse('asin_not_found');
   } finally {
+    scraperLog(runId, 'Closing page');
     await page.close();
   }
 }

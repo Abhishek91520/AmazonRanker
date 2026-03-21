@@ -17,6 +17,15 @@ import {
 export const maxDuration = 60; // Maximum 60 seconds execution
 export const dynamic = 'force-dynamic';
 
+function apiLog(requestId: string, message: string, meta?: Record<string, unknown>): void {
+  const timestamp = new Date().toISOString();
+  if (meta) {
+    console.log(`[API][${timestamp}][${requestId}] ${message}`, meta);
+    return;
+  }
+  console.log(`[API][${timestamp}][${requestId}] ${message}`);
+}
+
 /**
  * POST /api/check-rank
  * 
@@ -31,13 +40,20 @@ export const dynamic = 'force-dynamic';
  * }
  */
 export async function POST(request: NextRequest): Promise<NextResponse<RankCheckResponse>> {
+  const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+
   try {
+    apiLog(requestId, 'Incoming POST /api/check-rank');
+
     // Parse request body
     const body = await request.json();
+    apiLog(requestId, 'Request body parsed');
 
     // Validate request structure
     const validationError = validateRequest(body);
     if (validationError) {
+      apiLog(requestId, 'Validation failed', { validationError });
       return NextResponse.json(
         {
           success: false,
@@ -60,23 +76,40 @@ export async function POST(request: NextRequest): Promise<NextResponse<RankCheck
       locationPincode: body.locationPincode || undefined,
     };
 
-    // Execute rank check
-    console.log(`[API] Checking rank for ASIN: ${rankRequest.asin}, Keyword: ${rankRequest.keyword}`);
+    apiLog(requestId, 'Rank check started', {
+      asin: rankRequest.asin,
+      keyword: rankRequest.keyword,
+      checkOrganic: rankRequest.checkOrganic,
+      checkSponsored: rankRequest.checkSponsored,
+      enableLocation: rankRequest.enableLocation,
+      locationPincode: rankRequest.locationPincode || null,
+    });
     
     const result = await checkAsinRank(rankRequest, DEFAULT_SCRAPER_CONFIG);
 
-    // Log result
     if (result.success) {
-      console.log(`[API] Success - Organic: ${result.data?.organicRank}, Sponsored: ${result.data?.sponsoredRank}`);
+      apiLog(requestId, 'Rank check completed: success', {
+        organicRank: result.data?.organicRank ?? null,
+        sponsoredRank: result.data?.sponsoredRank ?? null,
+        pageFound: result.data?.pageFound ?? null,
+        durationMs: Date.now() - startedAt,
+      });
     } else {
-      console.log(`[API] Failed - Error: ${result.error?.code}`);
+      apiLog(requestId, 'Rank check completed: failed', {
+        errorCode: result.error?.code ?? 'unknown_error',
+        errorMessage: result.error?.message ?? 'Unknown error',
+        durationMs: Date.now() - startedAt,
+      });
     }
 
     return NextResponse.json(result, {
       status: result.success ? 200 : 500,
     });
   } catch (error) {
-    console.error('[API] Unexpected error:', error);
+    apiLog(requestId, 'Unexpected exception', {
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
 
     return NextResponse.json(
       {
