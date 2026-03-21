@@ -358,20 +358,7 @@ async function executeSearch(
     }
 
     // ASIN not found after scanning all pages
-    return {
-      success: true,
-      data: {
-        asin,
-        keyword,
-        organicRank: null,
-        sponsoredRank: null,
-        pageFound: null,
-        positionOnPage: null,
-        totalResultsScanned: totalScanned,
-        scannedPages: config.maxPages,
-        timestamp: new Date().toISOString(),
-      },
-    };
+    return createErrorResponse('asin_not_found');
   } finally {
     await page.close();
   }
