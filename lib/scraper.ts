@@ -371,6 +371,12 @@ async function executeSearch(
   let cumulativeSponsoredRank = 0;
   let totalScanned = 0;
 
+  // Track discovered ranks across scanned pages so we can return both values.
+  let discoveredOrganicRank: number | null = null;
+  let discoveredSponsoredRank: number | null = null;
+  let firstFoundPage: number | null = null;
+  let firstFoundPosition: number | null = null;
+
   try {
     for (let pageNum = 1; pageNum <= config.maxPages; pageNum++) {
       // Navigate to search page
@@ -431,29 +437,40 @@ async function executeSearch(
         totalSponsoredCount: parseResult.totalSponsoredCount,
       });
 
-      // Check if ASIN found
+      // Capture discovered ranks, but continue scanning until both are found.
       if (parseResult.found) {
-        // Calculate final ranks including previous pages
-        const result: RankResult = {
-          asin,
-          keyword,
-          organicRank: parseResult.organicRank !== null
-            ? cumulativeOrganicRank + parseResult.organicRank
-            : null,
-          sponsoredRank: parseResult.sponsoredRank !== null
-            ? cumulativeSponsoredRank + parseResult.sponsoredRank
-            : null,
-          pageFound: pageNum,
-          positionOnPage: parseResult.position,
-          totalResultsScanned: totalScanned,
-          scannedPages: pageNum,
-          timestamp: new Date().toISOString(),
-        };
+        if (firstFoundPage === null) {
+          firstFoundPage = pageNum;
+          firstFoundPosition = parseResult.position;
+        }
 
-        return {
-          success: true,
-          data: result,
-        };
+        if (parseResult.organicRank !== null && discoveredOrganicRank === null) {
+          discoveredOrganicRank = cumulativeOrganicRank + parseResult.organicRank;
+        }
+
+        if (parseResult.sponsoredRank !== null && discoveredSponsoredRank === null) {
+          discoveredSponsoredRank = cumulativeSponsoredRank + parseResult.sponsoredRank;
+        }
+
+        // Return early only when both values are available.
+        if (discoveredOrganicRank !== null && discoveredSponsoredRank !== null) {
+          const result: RankResult = {
+            asin,
+            keyword,
+            organicRank: discoveredOrganicRank,
+            sponsoredRank: discoveredSponsoredRank,
+            pageFound: firstFoundPage,
+            positionOnPage: firstFoundPosition,
+            totalResultsScanned: totalScanned,
+            scannedPages: pageNum,
+            timestamp: new Date().toISOString(),
+          };
+
+          return {
+            success: true,
+            data: result,
+          };
+        }
       }
 
       // Update cumulative counts for next page
@@ -466,9 +483,11 @@ async function executeSearch(
       }
     }
 
-    // Fallback strategy: If location was enabled and ASIN not found,
+    const missingAnyRank = discoveredOrganicRank === null || discoveredSponsoredRank === null;
+
+    // Fallback strategy: if location was enabled and at least one rank is still missing,
     // retry scan without location constraints because sponsored inventory can vary by pincode.
-    if (request.enableLocation && request.locationPincode) {
+    if (request.enableLocation && request.locationPincode && missingAnyRank) {
       scraperLog(runId, 'Starting no-location fallback scan', {
         previousLocationPincode: request.locationPincode,
         pagesToScan: config.maxPages,
@@ -545,39 +564,46 @@ async function executeSearch(
         });
 
         if (fallbackParse.found) {
-          const fallbackResult: RankResult = {
-            asin,
-            keyword,
-            organicRank:
-              fallbackParse.organicRank !== null
-                ? fallbackCumulativeOrganic + fallbackParse.organicRank
-                : null,
-            sponsoredRank:
-              fallbackParse.sponsoredRank !== null
-                ? fallbackCumulativeSponsored + fallbackParse.sponsoredRank
-                : null,
-            pageFound: fallbackPageNum,
-            positionOnPage: fallbackParse.position,
-            totalResultsScanned: fallbackTotalScanned,
-            scannedPages: fallbackPageNum,
-            timestamp: new Date().toISOString(),
-          };
+          if (firstFoundPage === null) {
+            firstFoundPage = fallbackPageNum;
+            firstFoundPosition = fallbackParse.position;
+          }
 
-          scraperLog(runId, 'No-location fallback succeeded', {
-            organicRank: fallbackResult.organicRank,
-            sponsoredRank: fallbackResult.sponsoredRank,
-            pageFound: fallbackResult.pageFound,
-          });
-          debugLogger?.('no_location_fallback_succeeded', {
-            organicRank: fallbackResult.organicRank,
-            sponsoredRank: fallbackResult.sponsoredRank,
-            pageFound: fallbackResult.pageFound,
-          });
+          if (fallbackParse.organicRank !== null && discoveredOrganicRank === null) {
+            discoveredOrganicRank = fallbackCumulativeOrganic + fallbackParse.organicRank;
+          }
 
-          return {
-            success: true,
-            data: fallbackResult,
-          };
+          if (fallbackParse.sponsoredRank !== null && discoveredSponsoredRank === null) {
+            discoveredSponsoredRank = fallbackCumulativeSponsored + fallbackParse.sponsoredRank;
+          }
+
+          if (discoveredOrganicRank !== null && discoveredSponsoredRank !== null) {
+            scraperLog(runId, 'No-location fallback succeeded with both ranks', {
+              organicRank: discoveredOrganicRank,
+              sponsoredRank: discoveredSponsoredRank,
+              pageFound: firstFoundPage,
+            });
+            debugLogger?.('no_location_fallback_succeeded', {
+              organicRank: discoveredOrganicRank,
+              sponsoredRank: discoveredSponsoredRank,
+              pageFound: firstFoundPage,
+            });
+
+            return {
+              success: true,
+              data: {
+                asin,
+                keyword,
+                organicRank: discoveredOrganicRank,
+                sponsoredRank: discoveredSponsoredRank,
+                pageFound: firstFoundPage,
+                positionOnPage: firstFoundPosition,
+                totalResultsScanned: totalScanned + fallbackTotalScanned,
+                scannedPages: fallbackPageNum,
+                timestamp: new Date().toISOString(),
+              },
+            };
+          }
         }
 
         fallbackCumulativeOrganic += fallbackParse.totalOrganicCount;
@@ -594,6 +620,24 @@ async function executeSearch(
       debugLogger?.('no_location_fallback_failed', {
         totalScanned: fallbackTotalScanned,
       });
+    }
+
+    // Return partial success when at least one rank was discovered.
+    if (discoveredOrganicRank !== null || discoveredSponsoredRank !== null) {
+      return {
+        success: true,
+        data: {
+          asin,
+          keyword,
+          organicRank: discoveredOrganicRank,
+          sponsoredRank: discoveredSponsoredRank,
+          pageFound: firstFoundPage,
+          positionOnPage: firstFoundPosition,
+          totalResultsScanned: totalScanned,
+          scannedPages: config.maxPages,
+          timestamp: new Date().toISOString(),
+        },
+      };
     }
 
     // ASIN not found after all strategies
