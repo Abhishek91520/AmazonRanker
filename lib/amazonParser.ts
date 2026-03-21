@@ -5,7 +5,6 @@
 
 import type { Page, ElementHandle } from 'puppeteer-core';
 import { SearchResultItem, AMAZON_SELECTORS } from './types';
-import { classifySponsored, isSponsored } from './sponsoredClassifier';
 import { 
   isInBoundaryZone, 
   validateBoundaryResult, 
@@ -324,82 +323,55 @@ async function extractSingleResult(
     // Get outer HTML for sponsored classification
     const outerHtml = await element.evaluate((el: Element) => el.outerHTML);
 
-    // Classify sponsored status using multi-signal detection
-    const sponsoredSignals = classifySponsored(outerHtml);
-    let sponsored = isSponsored(sponsoredSignals);
+    // Strict DOM-scoped sponsored detection (prevents full-card HTML false positives)
+    const directReason = await element.evaluate((el: Element) => {
+      const normalizedText = (el.textContent || '').replace(/\s+/g, ' ').toLowerCase();
 
-    // Fallback: Direct DOM check for sponsored indicators
-    if (!sponsored) {
-      const hasDirectSponsored = await element.evaluate((el: Element) => {
-        const text = (el.textContent || '').toLowerCase();
-        const html = el.innerHTML;
-
-        // 1) Direct sponsored labels in current card
-        if (/\bsponsored\b/i.test(text) || /\bsponsored\b/i.test(html)) return 'text';
-        if (/puis-sponsored|s-sponsored|sp-sponsored|adholder|adplaceholder/i.test(html)) return 'class';
-
-        // 2) Card-level metadata on self
-        const attrs = Array.from(el.attributes);
-        for (const attr of attrs) {
-          if (attr.name.startsWith('data-ad-')) return 'attr-name';
-          if (/\bsponsored\b|\badsense\b|\badplacement\b/i.test(attr.value)) return 'attr-value';
-          if (attr.name === 'cel_widget_id' && /sp_|adsense/i.test(attr.value)) return 'cel-widget';
-        }
-
-        // 3) Card descendants metadata/labels
-        if (el.querySelector('[data-component-type*="sp-sponsored"], [data-csa-c-type*="sponsoredProducts"], [cel_widget_id*="sp_"], [cel_widget_id*="ADSENSE"]')) {
-          return 'nested-sp-data';
-        }
-        if (el.querySelector('.s-sponsored-label-info-icon, .puis-sponsored-label-info-icon')) {
-          return 'nested-icon';
-        }
-
-        // 4) Sponsored redirect/link signatures
-        const sponsoredLink = el.querySelector(
-          'a[href*="slredirect"], a[href*="/gp/slredirect/"], a[href*="sp_csd"], a[href*="sspa"], a[href*="sprefix="]'
-        );
-        if (sponsoredLink) return 'sponsored-link';
-
-        // 5) Ancestor-level markers (Amazon sometimes places sponsored flags on wrappers)
-        let node: Element | null = el;
-        for (let depth = 0; depth < 4 && node; depth++) {
-          const nodeHtml = node.outerHTML || '';
-          const celWidget = node.getAttribute('cel_widget_id') || '';
-          const componentType = node.getAttribute('data-component-type') || '';
-          const csaType = node.getAttribute('data-csa-c-type') || '';
-
-          if (/sp_|adsense|sponsored/i.test(celWidget)) return 'ancestor-cel-widget';
-          if (/sp-sponsored|s-sponsored/i.test(componentType)) {
-            return 'ancestor-component';
-          }
-          if (/sponsoredproducts/i.test(csaType)) return 'ancestor-csa-type';
-          if (/puis-sponsored|s-sponsored|sp-sponsored|adholder/i.test(nodeHtml)) {
-            return 'ancestor-html';
-          }
-
-          node = node.parentElement;
-        }
-
-        // 6) Sibling label fallback (label may be adjacent, not nested)
-        const prev = el.previousElementSibling;
-        const next = el.nextElementSibling;
-        const prevText = (prev?.textContent || '').toLowerCase();
-        const nextText = (next?.textContent || '').toLowerCase();
-        if (/\bsponsored\b/.test(prevText) || /\bsponsored\b/.test(nextText)) return 'sibling-label';
-
-        return null;
-      });
-      
-      if (hasDirectSponsored) {
-        sponsored = true;
-        sponsoredSignals.signalCount = Math.max(1, sponsoredSignals.signalCount);
-        sponsoredSignals.hasSponsoredText = /text|class|sibling-label/.test(hasDirectSponsored);
-        sponsoredSignals.hasAdMetadata = /attr|data|link|widget|component|slot|html/.test(hasDirectSponsored);
-        // Log for debug
-        if (position <= 5) {
-          console.log(`[Parser] Fallback detected sponsored at pos ${position}: ${hasDirectSponsored}`);
-        }
+      // Strong label checks within the card
+      if (el.querySelector('.puis-sponsored-label-text, .s-sponsored-label-info-icon, .puis-sponsored-label-info-icon')) {
+        return 'label-node';
       }
+      if (/\bsponsored\b/.test(normalizedText)) {
+        return 'label-text';
+      }
+
+      // Strong sponsored container markers
+      if (el.matches('[data-component-type*="sp-sponsored"], [data-csa-c-type*="sponsoredProducts"]')) {
+        return 'self-sponsored-container';
+      }
+      if (el.querySelector('[data-component-type*="sp-sponsored"], [data-csa-c-type*="sponsoredProducts"]')) {
+        return 'nested-sponsored-container';
+      }
+
+      // Sponsored redirect link markers
+      if (
+        el.querySelector(
+          'a[href*="slredirect"], a[href*="/gp/slredirect/"], a[href*="sp_csd"], a[href*="sspa"]'
+        )
+      ) {
+        return 'sponsored-link';
+      }
+
+      // Strong cel_widget marker
+      const celWidget = (el.getAttribute('cel_widget_id') || '').toLowerCase();
+      if (/\bsp_|\badsense\b/.test(celWidget)) {
+        return 'cel-widget';
+      }
+
+      return null;
+    });
+
+    const sponsored = directReason !== null;
+    const sponsoredSignals = {
+      hasSponsoredText: sponsored && /label/.test(directReason || ''),
+      hasBadgeContainer: sponsored && /container|node/.test(directReason || ''),
+      hasAriaLabel: false,
+      hasAdMetadata: sponsored && /link|widget|container/.test(directReason || ''),
+      signalCount: sponsored ? 1 : 0,
+    };
+
+    if (sponsored && position <= 5) {
+      console.log(`[Parser] Direct sponsored detected at pos ${position}: ${directReason}`);
     }
 
     // Debug: For first 3 items, log sponsored-related HTML snippets
