@@ -47,6 +47,14 @@ export interface RankCheckResponse {
     code: ErrorCode;
     message: string;
   };
+  debug?: {
+    requestId: string;
+    events: Array<{
+      ts: string;
+      step: string;
+      meta?: Record<string, unknown>;
+    }>;
+  };
 }
 
 // Rank result data

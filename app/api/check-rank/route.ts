@@ -26,6 +26,24 @@ function apiLog(requestId: string, message: string, meta?: Record<string, unknow
   console.log(`[API][${timestamp}][${requestId}] ${message}`);
 }
 
+type DebugEvent = {
+  ts: string;
+  step: string;
+  meta?: Record<string, unknown>;
+};
+
+function pushDebugEvent(
+  events: DebugEvent[],
+  step: string,
+  meta?: Record<string, unknown>
+): void {
+  events.push({
+    ts: new Date().toISOString(),
+    step,
+    ...(meta ? { meta } : {}),
+  });
+}
+
 /**
  * POST /api/check-rank
  * 
@@ -42,24 +60,32 @@ function apiLog(requestId: string, message: string, meta?: Record<string, unknow
 export async function POST(request: NextRequest): Promise<NextResponse<RankCheckResponse>> {
   const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
+  const debugEvents: DebugEvent[] = [];
 
   try {
     apiLog(requestId, 'Incoming POST /api/check-rank');
+    pushDebugEvent(debugEvents, 'api_request_received');
 
     // Parse request body
     const body = await request.json();
     apiLog(requestId, 'Request body parsed');
+    pushDebugEvent(debugEvents, 'api_body_parsed');
 
     // Validate request structure
     const validationError = validateRequest(body);
     if (validationError) {
       apiLog(requestId, 'Validation failed', { validationError });
+      pushDebugEvent(debugEvents, 'api_validation_failed', { validationError });
       return NextResponse.json(
         {
           success: false,
           error: {
             code: 'invalid_input',
             message: validationError,
+          },
+          debug: {
+            requestId,
+            events: debugEvents,
           },
         },
         { status: 400 }
@@ -84,11 +110,31 @@ export async function POST(request: NextRequest): Promise<NextResponse<RankCheck
       enableLocation: rankRequest.enableLocation,
       locationPincode: rankRequest.locationPincode || null,
     });
+    pushDebugEvent(debugEvents, 'api_rank_check_started', {
+      asin: rankRequest.asin,
+      keyword: rankRequest.keyword,
+      checkOrganic: rankRequest.checkOrganic,
+      checkSponsored: rankRequest.checkSponsored,
+      enableLocation: rankRequest.enableLocation,
+      locationPincode: rankRequest.locationPincode || null,
+    });
     
-    const result = await checkAsinRank(rankRequest, DEFAULT_SCRAPER_CONFIG);
+    const result = await checkAsinRank(
+      rankRequest,
+      DEFAULT_SCRAPER_CONFIG,
+      (step, meta) => {
+        pushDebugEvent(debugEvents, `scraper_${step}`, meta);
+      }
+    );
 
     if (result.success) {
       apiLog(requestId, 'Rank check completed: success', {
+        organicRank: result.data?.organicRank ?? null,
+        sponsoredRank: result.data?.sponsoredRank ?? null,
+        pageFound: result.data?.pageFound ?? null,
+        durationMs: Date.now() - startedAt,
+      });
+      pushDebugEvent(debugEvents, 'api_rank_check_success', {
         organicRank: result.data?.organicRank ?? null,
         sponsoredRank: result.data?.sponsoredRank ?? null,
         pageFound: result.data?.pageFound ?? null,
@@ -100,13 +146,28 @@ export async function POST(request: NextRequest): Promise<NextResponse<RankCheck
         errorMessage: result.error?.message ?? 'Unknown error',
         durationMs: Date.now() - startedAt,
       });
+      pushDebugEvent(debugEvents, 'api_rank_check_failed', {
+        errorCode: result.error?.code ?? 'unknown_error',
+        errorMessage: result.error?.message ?? 'Unknown error',
+        durationMs: Date.now() - startedAt,
+      });
     }
 
-    return NextResponse.json(result, {
+    return NextResponse.json({
+      ...result,
+      debug: {
+        requestId,
+        events: debugEvents,
+      },
+    }, {
       status: result.success ? 200 : 500,
     });
   } catch (error) {
     apiLog(requestId, 'Unexpected exception', {
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    pushDebugEvent(debugEvents, 'api_unexpected_exception', {
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -117,6 +178,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<RankCheck
         error: {
           code: 'unknown_error',
           message: 'An unexpected error occurred while processing the request.',
+        },
+        debug: {
+          requestId,
+          events: debugEvents,
         },
       },
       { status: 500 }

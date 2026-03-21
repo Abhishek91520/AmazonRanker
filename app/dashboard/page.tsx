@@ -24,12 +24,26 @@ export default function DashboardPage() {
   const [singleLookupLoading, setSingleLookupLoading] = useState(false);
   const processingRef = useRef(false);
 
+  const logClientDebug = useCallback((scope: string, payload: Record<string, unknown>) => {
+    const ts = new Date().toISOString();
+    console.log(`[CLIENT][${ts}][${scope}]`, payload);
+  }, []);
+
   // Generate unique ID
   const generateId = () => `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   // Handle single ASIN lookup
   const handleSingleLookup = useCallback(async (data: SearchFormData) => {
     setSingleLookupLoading(true);
+
+    logClientDebug('single_lookup_start', {
+      asin: data.asin,
+      keyword: data.keyword,
+      checkOrganic: data.checkOrganic,
+      checkSponsored: data.checkSponsored,
+      enableLocation: data.enableLocation,
+      locationPincode: data.locationPincode || null,
+    });
 
     const job: BulkJobItem = {
       id: generateId(),
@@ -58,6 +72,22 @@ export default function DashboardPage() {
       });
 
       const result: RankCheckResponse = await response.json();
+      logClientDebug('single_lookup_response', {
+        status: response.status,
+        ok: response.ok,
+        success: result.success,
+        error: result.error || null,
+        data: result.data || null,
+        requestId: result.debug?.requestId || null,
+      });
+
+      if (result.debug?.events?.length) {
+        console.groupCollapsed(`[CLIENT][single_lookup][debug_trace] ${result.debug.requestId}`);
+        for (const event of result.debug.events) {
+          console.log(`${event.ts} | ${event.step}`, event.meta || {});
+        }
+        console.groupEnd();
+      }
 
       setJobs((prev) =>
         prev.map((j) =>
@@ -73,6 +103,9 @@ export default function DashboardPage() {
         )
       );
     } catch (error) {
+      logClientDebug('single_lookup_exception', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       setJobs((prev) =>
         prev.map((j) =>
           j.id === job.id
@@ -91,11 +124,16 @@ export default function DashboardPage() {
     } finally {
       setSingleLookupLoading(false);
     }
-  }, []);
+  }, [logClientDebug]);
 
   // Handle bulk Excel upload
   const handleBulkUpload = useCallback(async (data: ExcelInputRow[]) => {
     if (processingRef.current) return;
+
+    logClientDebug('bulk_upload_start', {
+      totalItems: data.length,
+      sample: data.slice(0, 3),
+    });
 
     processingRef.current = true;
     setIsProcessing(true);
@@ -116,6 +154,13 @@ export default function DashboardPage() {
       if (!processingRef.current) break;
 
       const job = newJobs[i];
+      logClientDebug('bulk_job_started', {
+        index: i + 1,
+        total: newJobs.length,
+        jobId: job.id,
+        asin: job.asin,
+        keyword: job.keyword,
+      });
 
       // Update status to processing
       setJobs((prev) =>
@@ -130,6 +175,13 @@ export default function DashboardPage() {
       let success = false;
 
       while (retryCount <= maxRetries && !success) {
+        logClientDebug('bulk_job_attempt', {
+          jobId: job.id,
+          asin: job.asin,
+          attempt: retryCount + 1,
+          maxAttempts: maxRetries + 1,
+        });
+
         if (retryCount > 0) {
           // Update status to retrying
           setJobs((prev) =>
@@ -156,6 +208,24 @@ export default function DashboardPage() {
           });
 
           const result: RankCheckResponse = await response.json();
+          logClientDebug('bulk_job_response', {
+            jobId: job.id,
+            asin: job.asin,
+            status: response.status,
+            ok: response.ok,
+            success: result.success,
+            error: result.error || null,
+            data: result.data || null,
+            requestId: result.debug?.requestId || null,
+          });
+
+          if (result.debug?.events?.length) {
+            console.groupCollapsed(`[CLIENT][bulk_job][debug_trace] ${result.debug.requestId} | ${job.asin}`);
+            for (const event of result.debug.events) {
+              console.log(`${event.ts} | ${event.step}`, event.meta || {});
+            }
+            console.groupEnd();
+          }
 
           if (result.success) {
             setJobs((prev) =>
@@ -171,6 +241,12 @@ export default function DashboardPage() {
               )
             );
             success = true;
+            logClientDebug('bulk_job_completed', {
+              jobId: job.id,
+              asin: job.asin,
+              organicRank: result.data?.organicRank ?? null,
+              sponsoredRank: result.data?.sponsoredRank ?? null,
+            });
           } else {
             // Check if error is retryable
             const retryableErrors: ErrorCode[] = ['captcha_detected', 'timeout', 'parsing_failed'];
@@ -189,17 +265,33 @@ export default function DashboardPage() {
                 )
               );
               success = true; // Exit retry loop
+              logClientDebug('bulk_job_failed_non_retryable', {
+                jobId: job.id,
+                asin: job.asin,
+                errorCode: result.error?.code || 'unknown_error',
+                errorMessage: result.error?.message || 'Unknown error',
+              });
             } else {
               retryCount++;
             }
           }
-        } catch {
+        } catch (error) {
+          logClientDebug('bulk_job_exception', {
+            jobId: job.id,
+            asin: job.asin,
+            error: error instanceof Error ? error.message : String(error),
+          });
           retryCount++;
         }
       }
 
       // If all retries failed
       if (!success) {
+        logClientDebug('bulk_job_failed_max_retries', {
+          jobId: job.id,
+          asin: job.asin,
+          retriesUsed: retryCount,
+        });
         setJobs((prev) =>
           prev.map((j) =>
             j.id === job.id
@@ -226,7 +318,10 @@ export default function DashboardPage() {
 
     processingRef.current = false;
     setIsProcessing(false);
-  }, []);
+    logClientDebug('bulk_upload_finished', {
+      totalJobs: newJobs.length,
+    });
+  }, [logClientDebug]);
 
   // Calculate progress stats
   const completedCount = jobs.filter((j) => j.status === 'completed').length;

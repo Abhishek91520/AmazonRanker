@@ -39,6 +39,21 @@ export async function parseSearchResults(
   results = mergeResults(results, additionalResults);
   console.log(`[Parser] Total merged: ${results.length}`);
 
+  // Targeted fallback: sometimes the target ASIN exists in page links/scripts but not in parsed cards.
+  const alreadyHasTarget = results.some((r) => r.asin.toUpperCase() === targetAsin.toUpperCase());
+  if (!alreadyHasTarget) {
+    const targetFallback = await extractTargetAsinFallback(page, targetAsin, results.length + 1);
+    if (targetFallback) {
+      results.push(targetFallback);
+      console.log('[Parser] Target ASIN recovered via page-level fallback', {
+        asin: targetAsin,
+        inferredSponsored: targetFallback.isSponsored,
+      });
+    } else {
+      console.log('[Parser] Target ASIN not found in page-level fallback sweep', { asin: targetAsin });
+    }
+  }
+
   // Debug: Log first few ASINs found
   if (results.length > 0) {
     const sampleAsins = results.slice(0, 5).map(r => r.asin);
@@ -196,6 +211,99 @@ async function extractSponsoredCandidates(page: Page): Promise<ExtractedResult[]
       signalCount: 1,
     },
   }));
+}
+
+/**
+ * Fallback extraction that searches the full page for a specific ASIN.
+ * Returns one inferred result when ASIN is detected outside normal result cards.
+ */
+async function extractTargetAsinFallback(
+  page: Page,
+  targetAsin: string,
+  position: number
+): Promise<ExtractedResult | null> {
+  const detection = await page.evaluate((asin: string) => {
+    const asinUpper = asin.toUpperCase();
+    const escapedAsin = asinUpper.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const asinRegex = new RegExp(escapedAsin, 'i');
+
+    const bodyHtml = document.body.innerHTML;
+    const bodyText = (document.body.innerText || '').toLowerCase();
+
+    if (!asinRegex.test(bodyHtml) && !asinRegex.test(bodyText)) {
+      return null;
+    }
+
+    // Locate links that explicitly reference the target ASIN.
+    const asinLinks = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
+      const href = a.getAttribute('href') || '';
+      return href.toUpperCase().includes(asinUpper);
+    });
+
+    let sponsoredEvidence = false;
+    for (const link of asinLinks) {
+      const href = (link.getAttribute('href') || '').toLowerCase();
+      if (href.includes('slredirect') || href.includes('/gp/slredirect/') || href.includes('sspa') || href.includes('sp_csd')) {
+        sponsoredEvidence = true;
+        break;
+      }
+
+      const near = (link.closest('[data-component-type], [cel_widget_id], [data-csa-c-slot-id], [aria-label]') as Element | null);
+      if (near) {
+        const nearHtml = near.outerHTML.toLowerCase();
+        const celWidget = (near.getAttribute('cel_widget_id') || '').toLowerCase();
+        const slotId = (near.getAttribute('data-csa-c-slot-id') || '').toLowerCase();
+        const aria = (near.getAttribute('aria-label') || '').toLowerCase();
+        if (
+          nearHtml.includes('sponsored') ||
+          nearHtml.includes('sp-sponsored') ||
+          celWidget.includes('sp_') ||
+          celWidget.includes('adsense') ||
+          slotId.includes('sp') ||
+          aria.includes('sponsored')
+        ) {
+          sponsoredEvidence = true;
+          break;
+        }
+      }
+    }
+
+    // If no explicit link hit, still infer from page-level sponsored wrappers containing ASIN nearby.
+    if (!sponsoredEvidence) {
+      const sponsoredWrappers = document.querySelectorAll(
+        '[aria-label*="sponsored" i], [data-component-type*="sp-sponsored" i], [cel_widget_id*="sp_"], [cel_widget_id*="ADSENSE"]'
+      );
+      sponsoredWrappers.forEach((el) => {
+        if (!sponsoredEvidence && (el.outerHTML || '').toUpperCase().includes(asinUpper)) {
+          sponsoredEvidence = true;
+        }
+      });
+    }
+
+    return {
+      found: true,
+      sponsored: sponsoredEvidence,
+      evidenceType: sponsoredEvidence ? 'sponsored-wrapper-or-link' : 'generic-page-hit',
+    };
+  }, targetAsin);
+
+  if (!detection?.found) {
+    return null;
+  }
+
+  return {
+    asin: targetAsin.toUpperCase(),
+    position,
+    isSponsored: detection.sponsored,
+    html: detection.evidenceType,
+    sponsoredSignals: {
+      hasSponsoredText: detection.sponsored,
+      hasBadgeContainer: false,
+      hasAriaLabel: detection.sponsored,
+      hasAdMetadata: detection.sponsored,
+      signalCount: detection.sponsored ? 1 : 0,
+    },
+  };
 }
 
 /**

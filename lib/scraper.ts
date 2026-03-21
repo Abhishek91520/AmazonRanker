@@ -37,13 +37,16 @@ function scraperLog(runId: string, message: string, meta?: Record<string, unknow
   console.log(`[SCRAPER][${timestamp}][${runId}] ${message}`);
 }
 
+type DebugLogger = (step: string, meta?: Record<string, unknown>) => void;
+
 /**
  * Main entry point for rank checking
  * Handles validation, browser management, and retry logic
  */
 export async function checkAsinRank(
   request: RankCheckRequest,
-  config: ScraperConfig = DEFAULT_SCRAPER_CONFIG
+  config: ScraperConfig = DEFAULT_SCRAPER_CONFIG,
+  debugLogger?: DebugLogger
 ): Promise<RankCheckResponse> {
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
@@ -56,11 +59,20 @@ export async function checkAsinRank(
     enableLocation: request.enableLocation,
     locationPincode: request.locationPincode || null,
   });
+  debugLogger?.('request_received', {
+    asin: request.asin,
+    keyword: request.keyword,
+    maxPages: config.maxPages,
+    maxRetries: config.maxRetries,
+    enableLocation: request.enableLocation,
+    locationPincode: request.locationPincode || null,
+  });
 
   // Input validation
   const validationError = validateInput(request);
   if (validationError) {
     scraperLog(runId, 'Input validation failed', { validationError });
+    debugLogger?.('validation_failed', { validationError });
     return createErrorResponse(validationError);
   }
 
@@ -84,10 +96,17 @@ export async function checkAsinRank(
         attempt: attempt + 1,
         totalAttempts: retryConfig.maxRetries + 1,
       });
+      debugLogger?.('attempt_started', {
+        attempt: attempt + 1,
+        totalAttempts: retryConfig.maxRetries + 1,
+      });
 
       // Launch browser for each attempt (clean context)
       browser = await launchBrowser();
       scraperLog(runId, 'Browser launched successfully');
+      debugLogger?.('browser_launched', {
+        attempt: attempt + 1,
+      });
 
       const result = await executeSearch(
         browser,
@@ -95,17 +114,27 @@ export async function checkAsinRank(
         normalizedKeyword,
         request,
         config,
-        runId
+        runId,
+        debugLogger
       );
 
       await browser.close();
       scraperLog(runId, 'Attempt succeeded', {
         durationMs: Date.now() - startedAt,
       });
+      debugLogger?.('attempt_succeeded', {
+        attempt: attempt + 1,
+        durationMs: Date.now() - startedAt,
+      });
       return result;
     } catch (error) {
       lastError = classifyError(error);
       scraperLog(runId, 'Attempt failed', {
+        attempt: attempt + 1,
+        errorCode: lastError,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      debugLogger?.('attempt_failed', {
         attempt: attempt + 1,
         errorCode: lastError,
         error: error instanceof Error ? error.message : String(error),
@@ -124,6 +153,7 @@ export async function checkAsinRank(
       // Check if we should retry
       if (!retryConfig.retryableErrors.includes(lastError)) {
         scraperLog(runId, 'Error is non-retryable, stopping retries', { errorCode: lastError });
+        debugLogger?.('non_retryable_error', { errorCode: lastError });
         break;
       }
 
@@ -131,12 +161,17 @@ export async function checkAsinRank(
       if (attempt < retryConfig.maxRetries) {
         const backoff = retryConfig.baseBackoffMs * Math.pow(2, attempt);
         scraperLog(runId, 'Waiting before retry', { backoffMs: backoff });
+        debugLogger?.('retry_waiting', { backoffMs: backoff });
         await sleep(backoff);
       }
     }
   }
 
   scraperLog(runId, 'All attempts exhausted', {
+    lastError,
+    durationMs: Date.now() - startedAt,
+  });
+  debugLogger?.('all_attempts_exhausted', {
     lastError,
     durationMs: Date.now() - startedAt,
   });
@@ -227,10 +262,12 @@ async function executeSearch(
   keyword: string,
   request: RankCheckRequest,
   config: ScraperConfig,
-  runId: string
+  runId: string,
+  debugLogger?: DebugLogger
 ): Promise<RankCheckResponse> {
   const page = await browser.newPage();
   scraperLog(runId, 'New page created');
+  debugLogger?.('page_created');
   
   // Set user agent and viewport
   await page.setUserAgent(BROWSER_CONFIG.userAgent);
@@ -304,6 +341,7 @@ async function executeSearch(
   if (request.enableLocation && request.locationPincode) {
     await setDeliveryLocation(page, request.locationPincode);
     scraperLog(runId, 'Location set', { locationPincode: request.locationPincode });
+    debugLogger?.('location_set', { locationPincode: request.locationPincode });
   }
 
   // Set cookies to look like a returning visitor
@@ -338,6 +376,7 @@ async function executeSearch(
       // Navigate to search page
       const searchUrl = getLocationAwareSearchUrl(keyword, pageNum, request.locationPincode);
       scraperLog(runId, 'Navigating to search page', { pageNum, searchUrl });
+      debugLogger?.('navigation_started', { pageNum, searchUrl });
       
       await page.goto(searchUrl, {
         waitUntil: 'domcontentloaded',
@@ -345,16 +384,19 @@ async function executeSearch(
         referer: pageNum === 1 ? 'https://www.google.com/' : 'https://www.amazon.in/',
       });
       scraperLog(runId, 'Navigation complete', { pageNum });
+      debugLogger?.('navigation_completed', { pageNum });
 
       // Check for CAPTCHA
       if (await hasCaptcha(page)) {
         scraperLog(runId, 'CAPTCHA detected', { pageNum });
+        debugLogger?.('captcha_detected', { pageNum });
         throw new Error('CAPTCHA detected');
       }
 
       // Check for no results
       if (await hasNoResults(page)) {
         scraperLog(runId, 'No results detected on page', { pageNum });
+        debugLogger?.('no_results_detected', { pageNum });
         if (pageNum === 1) {
           return createErrorResponse('asin_not_found');
         }
@@ -371,6 +413,15 @@ async function executeSearch(
       const parseResult = await parseSearchResults(page, asin);
       totalScanned += parseResult.totalResults;
       scraperLog(runId, 'Page parsed', {
+        pageNum,
+        found: parseResult.found,
+        organicRankOnPage: parseResult.organicRank,
+        sponsoredRankOnPage: parseResult.sponsoredRank,
+        totalResultsOnPage: parseResult.totalResults,
+        totalOrganicCount: parseResult.totalOrganicCount,
+        totalSponsoredCount: parseResult.totalSponsoredCount,
+      });
+      debugLogger?.('page_parsed', {
         pageNum,
         found: parseResult.found,
         organicRankOnPage: parseResult.organicRank,
@@ -422,9 +473,16 @@ async function executeSearch(
       totalScanned,
       scannedPages: config.maxPages,
     });
+    debugLogger?.('asin_not_found_after_scan', {
+      asin,
+      keyword,
+      totalScanned,
+      scannedPages: config.maxPages,
+    });
     return createErrorResponse('asin_not_found');
   } finally {
     scraperLog(runId, 'Closing page');
+    debugLogger?.('page_closing');
     await page.close();
   }
 }
