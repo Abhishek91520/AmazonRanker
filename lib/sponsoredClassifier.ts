@@ -6,8 +6,8 @@
 import { SponsoredSignals } from './types';
 
 // Minimum signals required to classify as sponsored
-// Lowered to 1 for datacenter IP compatibility
-const SPONSORED_THRESHOLD = 1;
+// Keep at 2 to avoid classifying most results as sponsored on Amazon search pages
+const SPONSORED_THRESHOLD = 2;
 
 /**
  * Analyzes DOM element for sponsored signals
@@ -146,7 +146,6 @@ function detectAriaLabels(html: string): boolean {
 function detectAdMetadata(html: string): boolean {
   const metadataPatterns = [
     /data-ad-/i,
-    /data-sp-/i,
     /data-click-el=["'][^"']*sp[^"']*["']/i,
     /data-csa-c-type=["']?sponsoredProducts["']?/i,
     /class=["'][^"']*sp-item[^"']*["']/i,
@@ -158,8 +157,6 @@ function detectAdMetadata(html: string): boolean {
     /href=["'][^"']*sp_csd[^"']*["']/i,
     /href=["'][^"']*&linkCode=sp[^"']*["']/i,
     // Data attributes for ad tracking
-    /data-csa-c-slot-id=["'][^"']*sp[^"']*["']/i,
-    /data-sp-link/i,
     /data-hvp-metadata/i,
   ];
 

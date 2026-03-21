@@ -341,12 +341,13 @@ async function extractSingleResult(
         // 2) Card-level metadata on self
         const attrs = Array.from(el.attributes);
         for (const attr of attrs) {
-          if (attr.name.startsWith('data-sp-') || attr.name.startsWith('data-ad-')) return 'attr-name';
-          if (/sp_|sponsored|adsense|adplacement/i.test(attr.value)) return 'attr-value';
+          if (attr.name.startsWith('data-ad-')) return 'attr-name';
+          if (/\bsponsored\b|\badsense\b|\badplacement\b/i.test(attr.value)) return 'attr-value';
+          if (attr.name === 'cel_widget_id' && /sp_|adsense/i.test(attr.value)) return 'cel-widget';
         }
 
         // 3) Card descendants metadata/labels
-        if (el.querySelector('[data-component-type*="sp"], [data-csa-c-slot-id*="sp"], [data-sp-link]')) {
+        if (el.querySelector('[data-component-type*="sp-sponsored"], [data-csa-c-type*="sponsoredProducts"], [cel_widget_id*="sp_"], [cel_widget_id*="ADSENSE"]')) {
           return 'nested-sp-data';
         }
         if (el.querySelector('.s-sponsored-label-info-icon, .puis-sponsored-label-info-icon')) {
@@ -365,14 +366,14 @@ async function extractSingleResult(
           const nodeHtml = node.outerHTML || '';
           const celWidget = node.getAttribute('cel_widget_id') || '';
           const componentType = node.getAttribute('data-component-type') || '';
-          const slotId = node.getAttribute('data-csa-c-slot-id') || '';
+          const csaType = node.getAttribute('data-csa-c-type') || '';
 
           if (/sp_|adsense|sponsored/i.test(celWidget)) return 'ancestor-cel-widget';
-          if (/sp-sponsored|s-sponsored|s-search-result/i.test(componentType) && /sp|sponsored/i.test(componentType)) {
+          if (/sp-sponsored|s-sponsored/i.test(componentType)) {
             return 'ancestor-component';
           }
-          if (/sp|sponsored/i.test(slotId)) return 'ancestor-slot';
-          if (/puis-sponsored|s-sponsored|sp-sponsored|adholder|adsense/i.test(nodeHtml)) {
+          if (/sponsoredproducts/i.test(csaType)) return 'ancestor-csa-type';
+          if (/puis-sponsored|s-sponsored|sp-sponsored|adholder/i.test(nodeHtml)) {
             return 'ancestor-html';
           }
 
