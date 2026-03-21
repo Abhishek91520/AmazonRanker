@@ -136,9 +136,9 @@ export interface ScraperConfig {
   locationPincode?: string;
 }
 
-// Default scraper configuration - optimized for Vercel 60s timeout
+// Default scraper configuration - full-depth scan
 export const DEFAULT_SCRAPER_CONFIG: ScraperConfig = {
-  maxPages: 2,
+  maxPages: 10,
   maxRetries: 1,
   baseBackoffMs: 1000,
   requestTimeoutMs: 15000,

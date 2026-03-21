@@ -14,7 +14,7 @@ import {
 } from '@/lib/types';
 
 // Vercel serverless function configuration
-export const maxDuration = 60; // Maximum 60 seconds execution
+export const maxDuration = 300; // Allow deeper scans
 export const dynamic = 'force-dynamic';
 
 function apiLog(requestId: string, message: string, meta?: Record<string, unknown>): void {
